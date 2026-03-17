@@ -1,6 +1,6 @@
 {
-  "name": "GameBanana Mod Manager",
-  "version": "0.0.2",
+  "name": "gamebanana-mod-manager",
+  "version": "0.0.3",
   "description": "A mod manager to manage mods from GameBanana with some other QOL features.",
   "main": "./out/main/index.js",
   "author": "Aeonian Rose (BManke)",
@@ -68,3 +68,4 @@
     "vite": "^7.2.6"
   }
 }
+
