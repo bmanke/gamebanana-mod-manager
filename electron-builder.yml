@@ -1,0 +1,43 @@
+appId: com.modmanager
+productName: GB Mod Manager
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+# Bundle 7zip binaries into Resources/7zip so they work without a system install
+extraResources:
+  - from: node_modules/7zip-bin-full/win/x64
+    to: 7zip/win/x64
+    filter:
+      - '7z.exe'
+      - '7z.dll'
+  - from: node_modules/7zip-bin-full/mac
+    to: 7zip/mac
+  - from: node_modules/7zip-bin-full/linux
+    to: 7zip/linux
+win:
+  executableName: gb-mod-manager
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+mac:
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    - NSCameraUsageDescription: Application requests access to the device's camera.
+    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
+    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
+    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+linux:
+  target:
+    - AppImage
+    - snap
+    - deb
+  maintainer: electronjs.org
+  category: Utility
