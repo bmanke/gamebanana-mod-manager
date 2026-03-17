@@ -1,9 +1,9 @@
 {
-  "name": "my-mod-manager",
-  "version": "1.0.0",
-  "description": "An Electron application with React and TypeScript",
+  "name": "GameBanana Mod Manager",
+  "version": "0.0.2",
+  "description": "A mod manager to manage mods from GameBanana with some other QOL features.",
   "main": "./out/main/index.js",
-  "author": "example.com",
+  "author": "Aeonian Rose (BManke)",
   "homepage": "https://electron-vite.org",
   "build": {
     "extraResources": [
