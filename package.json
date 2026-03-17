@@ -1,10 +1,11 @@
 {
   "name": "gamebanana-mod-manager",
-  "version": "0.0.3",
+  "productName": "GB Mod Manager",
+  "version": "0.0.5",
   "description": "A mod manager to manage mods from GameBanana with some other QOL features.",
   "main": "./out/main/index.js",
   "author": "Aeonian Rose (BManke)",
-  "homepage": "https://electron-vite.org",
+  "homepage": "https://bmanke.github.io/gamebanana-mod-manager-site/",
   "build": {
     "extraResources": [
       {
@@ -25,7 +26,7 @@
     "build": "npm run download-reshade && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "npm run build && electron-builder --win",
+    "build:win": "npm run build && electron-builder --win --config.win.signAndEditExecutable=false",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
     "download-reshade": "node scripts/download-reshade.mjs",
