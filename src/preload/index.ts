@@ -71,7 +71,7 @@ contextBridge.exposeInMainWorld('modApi', {
     ipcRenderer.invoke('gameExePath:open', gameId),
 
   // ─── ReShade ─────────────────────────────────────────────────────────────────
-  reshadeGetLatest: (): Promise<{ version: string; downloadUrl: string; addonDownloadUrl: string | null }> =>
+  reshadeGetLatest: (): Promise<{ version: string; hasAddon: boolean }> =>
     ipcRenderer.invoke('reshade:getLatest'),
 
   reshadeInstall: (gameId: number): Promise<{ installed: boolean; dllName?: string }> =>
@@ -115,6 +115,18 @@ contextBridge.exposeInMainWorld('modApi', {
 
   reshadeOpenPresetsDir: (gameId: number): Promise<void> =>
     ipcRenderer.invoke('reshade:openPresetsDir', gameId),
+
+  // ─── GameBanana categories & mods ────────────────────────────────────────────
+  gbGetGameCategories: (gameId: number): Promise<Array<{
+    id: number
+    name: string
+    url: string
+    parentId: number | null
+  }>> =>
+    ipcRenderer.invoke('gb:getGameCategories', gameId),
+
+  gbGetGameMods: (gameId: number, categoryId?: number): Promise<unknown> =>
+    ipcRenderer.invoke('gb:getGameMods', gameId, categoryId),
 
   // ─── GB API Proxy ────────────────────────────────────────────────────────────
   gbFetch: (url: string): Promise<unknown> =>

@@ -11,6 +11,13 @@ import {
   GBGame
 } from '../api/gamebanana'
 
+interface GBCategory {
+  id: number
+  name: string
+  url: string
+  parentId: number | null
+}
+
 // ─── Pinned Games ─────────────────────────────────────────────────────────────
 
 const PINNED_GAMES: GBGame[] = [
@@ -20,6 +27,78 @@ const PINNED_GAMES: GBGame[] = [
   { _idRow: 20357, _sName: 'Wuthering Waves' },
   { _idRow: 21842, _sName: 'Arknights: Endfield' }
 ]
+
+// ─── Per‑game categories for the sidebar ──────────────────────────────────────
+
+const GAME_CATEGORY_PRESETS: Record<number, GBCategory[]> = {
+  // Genshin Impact
+  8552: [
+    {
+      id: 18140,
+      name: 'Skins (Characters)',
+      url: 'https://gamebanana.com/mods/cats/18140',
+      parentId: null
+    },
+    {
+      id: 18137,
+      name: 'Weapons',
+      url: 'https://gamebanana.com/mods/cats/18137',
+      parentId: null
+    }
+  ],
+
+  // Honkai: Star Rail
+  18366: [
+    {
+      id: 22832,
+      name: 'Skins (Characters)',
+      url: 'https://gamebanana.com/mods/cats/22832',
+      parentId: null
+    },
+    {
+      id: 22833,
+      name: 'Weapons',
+      url: 'https://gamebanana.com/mods/cats/22833',
+      parentId: null
+    }
+  ],
+
+  // Zenless Zone Zero
+  19567: [
+    {
+      id: 30305,
+      name: 'Skins',
+      url: 'https://gamebanana.com/mods/cats/30305',
+      parentId: null
+    }
+  ],
+
+  // Wuthering Waves
+  20357: [
+    {
+      id: 29524,
+      name: 'Skins',
+      url: 'https://gamebanana.com/mods/cats/29524',
+      parentId: null
+    }
+  ],
+
+  // Arknights: Endfield
+  21842: [
+    {
+      id: 42770,
+      name: 'Operators',
+      url: 'https://gamebanana.com/mods/cats/42770',
+      parentId: 35464
+    },
+    {
+      id: 42772,
+      name: 'Weapons',
+      url: 'https://gamebanana.com/mods/cats/42772',
+      parentId: 35464
+    }
+  ]
+}
 
 // ─── Game Selector ────────────────────────────────────────────────────────────
 
@@ -82,7 +161,9 @@ function GameSelector({
             <button
               onClick={(e) => { e.stopPropagation(); onSelect(null); setQuery('') }}
               className="text-gray-400 hover:text-white text-xs shrink-0"
-            >✕</button>
+            >
+              ✕
+            </button>
           </>
         ) : (
           <>
@@ -141,6 +222,55 @@ function GameSelector({
   )
 }
 
+// ─── Category Sidebar ─────────────────────────────────────────────────────────
+
+function GameCategoryBrowser({
+  gameId,
+  onCategoryChange
+}: {
+  gameId: number
+  onCategoryChange: (category: GBCategory | null) => void
+}) {
+  const categories = GAME_CATEGORY_PRESETS[gameId] ?? []
+  const [active, setActive] = useState<GBCategory | null>(null)
+
+  useEffect(() => {
+    setActive(null)
+    onCategoryChange(null)
+  }, [gameId])
+
+  if (!categories.length) return null
+
+  return (
+    <div className="w-64 bg-gray-900 border border-gray-800 rounded-xl p-3 text-xs max-h-80 overflow-auto">
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-semibold text-gray-200">Categories</span>
+        {active && (
+          <button
+            onClick={() => { setActive(null); onCategoryChange(null) }}
+            className="text-[10px] text-gray-400 hover:text-gray-200"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {categories.map((cat) => (
+        <button
+          key={cat.id}
+          onClick={() => { setActive(cat); onCategoryChange(cat) }}
+          className={`block w-full text-left px-2 py-1 rounded mb-0.5 text-xs ${
+            active?.id === cat.id
+              ? 'bg-yellow-500/20 text-yellow-300'
+              : 'text-gray-300 hover:bg-gray-800'
+          }`}
+        >
+          {cat.name}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ─── Mod Card ─────────────────────────────────────────────────────────────────
 
 function ModCard({
@@ -167,7 +297,9 @@ function ModCard({
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-600 text-3xl">📦</div>
+          <div className="w-full h-full flex items-center justify-center text-gray-600 text-3xl">
+            📦
+          </div>
         )}
       </div>
       <div className="p-3 space-y-1">
@@ -298,7 +430,9 @@ function ModDetailModal({
                 <button
                   onClick={onClose}
                   className="text-gray-500 hover:text-white text-xl shrink-0"
-                >✕</button>
+                >
+                  ✕
+                </button>
               </div>
 
               <div className="flex gap-4 text-sm text-gray-400">
@@ -383,6 +517,7 @@ export default function Browse() {
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [selectedGame, setSelectedGame] = useState<GBGame | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<GBCategory | null>(null)
   const [sort, setSort] = useState<SortOption>('popular')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -403,6 +538,7 @@ export default function Browse() {
       const result = await searchMods({
         query: query.trim() || undefined,
         gameId: selectedGame?._idRow,
+        categoryId: selectedCategory?.id,
         sort,
         page: targetPage,
         perPage: 24
@@ -415,7 +551,7 @@ export default function Browse() {
     } finally {
       setLoading(false)
     }
-  }, [query, selectedGame, sort])
+  }, [query, selectedGame, selectedCategory, sort])
 
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current)
@@ -425,46 +561,20 @@ export default function Browse() {
     }
   }, [fetchMods])
 
-  return (
-    <div className="space-y-5">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          type="text"
-          placeholder="Search mods..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="flex-1 min-w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 outline-none focus:border-yellow-500 transition-colors"
-        />
-        <GameSelector
-          selectedGame={selectedGame}
-          onSelect={(g) => { setSelectedGame(g); setPage(1) }}
-        />
-        <div className="flex rounded-lg overflow-hidden border border-gray-700">
-          {(['popular', 'new', 'updated'] as SortOption[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setSort(s)}
-              className={`px-3 py-2 text-sm capitalize transition-colors ${
-                sort === s
-                  ? 'bg-yellow-500 text-black font-semibold'
-                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
+  function handleGameSelect(game: GBGame | null) {
+    setSelectedGame(game)
+    setSelectedCategory(null)
+    setPage(1)
+  }
 
-      {/* Error */}
+  const content = (
+    <>
       {error && (
         <div className="bg-red-900/30 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
           {error}
         </div>
       )}
 
-      {/* Grid */}
       {loading ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {Array.from({ length: 24 }).map((_, i) => (
@@ -495,7 +605,6 @@ export default function Browse() {
         </div>
       )}
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2 pt-4">
           <button
@@ -515,8 +624,57 @@ export default function Browse() {
           </button>
         </div>
       )}
+    </>
+  )
 
-      {/* Modal */}
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          type="text"
+          placeholder="Search mods..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="flex-1 min-w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 outline-none focus:border-yellow-500 transition-colors"
+        />
+        <GameSelector
+          selectedGame={selectedGame}
+          onSelect={handleGameSelect}
+        />
+        <div className="flex rounded-lg overflow-hidden border border-gray-700">
+          {(['popular', 'new', 'updated'] as SortOption[]).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSort(s)}
+              className={`px-3 py-2 text-sm capitalize transition-colors ${
+                sort === s
+                  ? 'bg-yellow-500 text-black font-semibold'
+                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {selectedGame ? (
+        <div className="flex gap-4">
+          <GameCategoryBrowser
+            gameId={selectedGame._idRow}
+            onCategoryChange={(cat) => {
+              setSelectedCategory(cat)
+              setPage(1)
+            }}
+          />
+          <div className="flex-1 space-y-5">
+            {content}
+          </div>
+        </div>
+      ) : (
+        content
+      )}
+
       {selectedModId !== null && (
         <ModDetailModal
           modId={selectedModId}

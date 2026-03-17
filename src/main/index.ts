@@ -17,7 +17,6 @@ import {
   openPresetsDir
 } from './reshade'
 
-
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -49,9 +48,7 @@ function createWindow(): void {
   }
 }
 
-
 // ─── Mod Handlers ─────────────────────────────────────────────────────────────
-
 
 ipcMain.handle(
   'mod:install',
@@ -127,16 +124,16 @@ ipcMain.handle('mod:checkUpdates', async () => {
           fileName: latest._sFile
         })
       }
-    } catch { /* skip */ }
+    } catch {
+      // ignore errors for individual mods
+    }
   }
   return updates
 })
 
 ipcMain.handle('mod:openDir', () => shell.openPath(getModsDir()))
 
-
 // ─── Mod Install Path Handlers ────────────────────────────────────────────────
-
 
 ipcMain.handle('gamePath:pick', async () => {
   const result = await dialog.showOpenDialog({
@@ -161,9 +158,7 @@ ipcMain.handle('gamePath:open', (_, gameId: number) => {
   if (p) shell.openPath(p)
 })
 
-
 // ─── Game Exe Path Handlers (for ReShade) ─────────────────────────────────────
-
 
 ipcMain.handle('gameExePath:pick', async () => {
   const result = await dialog.showOpenDialog({
@@ -188,9 +183,7 @@ ipcMain.handle('gameExePath:open', (_, gameId: number) => {
   if (p) shell.openPath(p)
 })
 
-
 // ─── ReShade Handlers ─────────────────────────────────────────────────────────
-
 
 ipcMain.handle('reshade:getLatest', () => {
   return getBundledRelease()
@@ -221,9 +214,7 @@ ipcMain.handle('reshade:uninstall', (_, gameId: number) => {
   return { installed: false }
 })
 
-
 // ─── ReShade Preset Handlers ──────────────────────────────────────────────────
-
 
 ipcMain.handle('reshade:listPresets', (_, gameId: number) => {
   const gameDir = store.getGameExePath(gameId)
@@ -276,19 +267,59 @@ ipcMain.handle('reshade:openPresetsDir', (_, gameId: number) => {
   shell.openPath(dir)
 })
 
+// ─── GameBanana Categories & Mods (currently unused; safe to keep) ────────────
 
-// ─── GB API Proxy ─────────────────────────────────────────────────────────────
-
-
-ipcMain.handle('gb:fetch', async (_, url: string) => {
+ipcMain.handle('gb:getGameCategories', async (_, gameId: number) => {
+  const url =
+    `https://gamebanana.com/apiv11/ModCategory?` +
+    `_csvGameRow=${gameId}` +
+    `&_csvProperties=_idRow,_sName,_sProfileUrl,_idParentCategoryRow`
   const res = await net.fetch(url)
-  if (!res.ok) throw new Error(`GB API error ${res.status}`)
+  if (!res.ok) throw new Error(`GB categories error ${res.status}`)
+  const data = await res.json() as Array<any>
+  return data.map((cat) => ({
+    id: cat._idRow as number,
+    name: cat._sName as string,
+    url: cat._sProfileUrl as string,
+    parentId: (cat._idParentCategoryRow ?? null) as number | null
+  }))
+})
+
+ipcMain.handle('gb:getGameMods', async (_ , gameId: number, categoryId?: number) => {
+  const base = 'https://gamebanana.com/apiv11/Mod'
+  const params = new URLSearchParams({
+    _nPerpage: '50',
+    _csvGameRow: String(gameId),
+    _csvProperties: '_idRow,_sName,_sProfileUrl,_aCategory'
+  })
+  if (categoryId) {
+    params.set('_csvCategoryRow', String(categoryId))
+  }
+  const res = await net.fetch(`${base}?${params.toString()}`)
+  if (!res.ok) throw new Error(`GB mods error ${res.status}`)
   return res.json()
 })
 
+// ─── GB API Proxy ─────────────────────────────────────────────────────────────
+
+ipcMain.handle('gb:fetch', async (_, url: string) => {
+  const res = await net.fetch(url)
+  if (!res.ok) {
+    throw new Error(`GB API error ${res.status}`)
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer())
+  const text = buf.toString('utf-8')
+
+  // Try JSON first, fall back to plain text
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+})
 
 // ─── App Lifecycle ────────────────────────────────────────────────────────────
-
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.modmanager')
