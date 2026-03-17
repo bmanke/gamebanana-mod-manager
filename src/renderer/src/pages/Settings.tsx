@@ -304,7 +304,6 @@ function ReShadeSection() {
   const [statuses, setStatuses] = useState<Record<number, ReShadeStatus>>({})
   const [presets, setPresets] = useState<Record<number, ReShadePreset[]>>({})
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
-  const [hasAddon, setHasAddon] = useState(false)
   const [loadingVersion, setLoadingVersion] = useState(false)
   const [installing, setInstalling] = useState<number | null>(null)
   const [uninstalling, setUninstalling] = useState<number | null>(null)
@@ -333,7 +332,6 @@ function ReShadeSection() {
     window.modApi.reshadeGetLatest()
       .then((release) => {
         setLatestVersion(release.version)
-        setHasAddon(!!release.addonDownloadUrl)
       })
       .catch(() => setLatestVersion(null))
       .finally(() => setLoadingVersion(false))
@@ -364,13 +362,11 @@ function ReShadeSection() {
     setPresets((prev) => { const n = { ...prev }; delete n[gameId]; return n })
   }
 
-  async function handleInstall(gameId: number, addon = false) {
+  async function handleInstall(gameId: number) {
     setError(null)
     setInstalling(gameId)
     try {
-      const status = addon
-        ? await window.modApi.reshadeInstallAddon(gameId)
-        : await window.modApi.reshadeInstall(gameId)
+      const status = await window.modApi.reshadeInstall(gameId)
       setStatuses((prev) => ({ ...prev, [gameId]: status }))
       if (status.installed) {
         const gamePresets = await window.modApi.reshadeListPresets(gameId)
@@ -419,13 +415,13 @@ function ReShadeSection() {
         </div>
         <div className="text-right shrink-0 ml-4">
           {loadingVersion ? (
-            <span className="text-xs text-gray-500 animate-pulse">Checking version...</span>
+            <span className="text-xs text-gray-500 animate-pulse">Loading...</span>
           ) : latestVersion ? (
             <span className="text-xs text-gray-400">
-              Latest: <span className="text-yellow-400 font-mono">{latestVersion}</span>
+              Bundled: <span className="text-yellow-400 font-mono">{latestVersion}</span>
             </span>
           ) : (
-            <span className="text-xs text-red-400">Could not fetch version</span>
+            <span className="text-xs text-red-400">Could not read bundled version</span>
           )}
         </div>
       </div>
@@ -439,7 +435,7 @@ function ReShadeSection() {
       <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-3 text-sm text-gray-400 space-y-1">
         <p className="font-medium text-gray-300">How it works</p>
         <p>1. Set each game's directory — the folder containing the game's <span className="font-mono text-gray-300">.exe</span> file.</p>
-        <p>2. Click <span className="text-yellow-400 font-medium">Install ReShade</span> — the official installer will open. Select your game's <span className="font-mono text-gray-300">.exe</span> and the rendering API.</p>
+        <p>2. Click <span className="text-yellow-400 font-medium">Install ReShade</span> — the bundled installer will open. Select your game's <span className="font-mono text-gray-300">.exe</span> and the rendering API, then click <span className="text-yellow-400 font-medium">↻ Refresh</span> when done.</p>
         <p>3. Most games in this list use <span className="font-mono text-gray-300">Direct3D 10/11/12</span>.</p>
       </div>
 
@@ -528,29 +524,17 @@ function ReShadeSection() {
                     {isUninstalling ? 'Removing...' : 'Uninstall ReShade'}
                   </button>
                 ) : (
-                  <>
-                    <button
-                      onClick={() => handleInstall(game._idRow, false)}
-                      disabled={isInstalling}
-                      className="px-3 py-1.5 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black text-xs font-semibold disabled:opacity-50 transition-colors"
-                    >
-                      {isInstalling
-                        ? 'Opening installer...'
-                        : loadingVersion
-                          ? 'Install ReShade'
-                          : `Install ReShade ${latestVersion ?? ''}`}
-                    </button>
-                    {hasAddon && (
-                      <button
-                        onClick={() => handleInstall(game._idRow, true)}
-                        disabled={isInstalling}
-                        className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs disabled:opacity-50 transition-colors"
-                        title="Includes addon support — required for some shader suites"
-                      >
-                        Install with Addon Support
-                      </button>
-                    )}
-                  </>
+                  <button
+                    onClick={() => handleInstall(game._idRow)}
+                    disabled={isInstalling}
+                    className="px-3 py-1.5 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black text-xs font-semibold disabled:opacity-50 transition-colors"
+                  >
+                    {isInstalling
+                      ? 'Launching installer...'
+                      : loadingVersion
+                        ? 'Install ReShade'
+                        : `Install ReShade ${latestVersion ?? ''}`}
+                  </button>
                 )}
                 <button
                   onClick={() => handleRefresh(game._idRow)}

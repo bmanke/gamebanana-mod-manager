@@ -11,8 +11,7 @@ interface ReShadeStatus {
 
 interface ReShadeRelease {
   version: string
-  downloadUrl: string
-  addonDownloadUrl: string | null
+  hasAddon: boolean
 }
 
 interface ReShadePreset {

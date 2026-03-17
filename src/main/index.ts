@@ -5,8 +5,8 @@ import icon from '../../resources/icon.png?asset'
 import { installMod, uninstallMod, getModsDir } from './downloader'
 import { store, InstalledMod } from './store'
 import {
-  getLatestRelease,
-  runInstaller,
+  getBundledRelease,
+  launchInstaller,
   checkInstalled,
   uninstallReShade,
   listPresets,
@@ -192,21 +192,18 @@ ipcMain.handle('gameExePath:open', (_, gameId: number) => {
 // ─── ReShade Handlers ─────────────────────────────────────────────────────────
 
 
-ipcMain.handle('reshade:getLatest', async () => {
-  return getLatestRelease()
+ipcMain.handle('reshade:getLatest', () => {
+  return getBundledRelease()
 })
 
-ipcMain.handle('reshade:install', async (_, gameId: number) => {
-  const release = await getLatestRelease()
-  await runInstaller(release.version, release.downloadUrl)
+ipcMain.handle('reshade:install', (_, gameId: number) => {
+  launchInstaller(false)
   const gameDir = store.getGameExePath(gameId)
   return gameDir ? checkInstalled(gameDir) : { installed: false }
 })
 
-ipcMain.handle('reshade:installAddon', async (_, gameId: number) => {
-  const release = await getLatestRelease()
-  if (!release.addonDownloadUrl) throw new Error('No addon build available for this release')
-  await runInstaller(release.version, release.addonDownloadUrl)
+ipcMain.handle('reshade:installAddon', (_, gameId: number) => {
+  launchInstaller(true)
   const gameDir = store.getGameExePath(gameId)
   return gameDir ? checkInstalled(gameDir) : { installed: false }
 })

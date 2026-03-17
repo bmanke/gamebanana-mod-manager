@@ -1,16 +1,21 @@
-import { net } from 'electron'
+import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import os from 'os'
-import { spawn } from 'child_process'
+import { exec } from 'child_process'
 
-const TEMP_DIR = path.join(os.tmpdir(), 'gb-mod-manager')
-const GITHUB_API = 'https://api.github.com/repos/crosire/reshade/releases/latest'
+// ─── Paths ────────────────────────────────────────────────────────────────────
+
+function getReshadeResourcesDir(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'reshade')
+    : path.join(__dirname, '../../resources/reshade')
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ReShadeRelease {
   version: string
-  downloadUrl: string
-  addonDownloadUrl: string | null
+  hasAddon: boolean
 }
 
 export interface ReShadeStatus {
@@ -25,70 +30,42 @@ export interface ReShadePreset {
   isActive: boolean
 }
 
-const RESHADE_DLLS = ['dxgi.dll', 'd3d11.dll', 'd3d12.dll', 'd3d9.dll', 'opengl32.dll']
-const RESHADE_INI = 'ReShade.ini'
-const PRESETS_SUBDIR = 'reshade-presets'
+// ─── Release manifest ─────────────────────────────────────────────────────────
 
-// ─── Release ──────────────────────────────────────────────────────────────────
-
-export async function getLatestRelease(): Promise<ReShadeRelease> {
-  const res = await net.fetch(GITHUB_API, {
-    headers: {
-      'User-Agent': 'gb-mod-manager',
-      'Accept': 'application/vnd.github.v3+json'
-    }
-  })
-  if (!res.ok) throw new Error(`GitHub API error: ${res.status}`)
-  const data = await res.json()
-
-  const version: string = (data.tag_name ?? data.name ?? 'unknown').replace(/^v/, '')
-  const assets = (data.assets ?? []) as Array<{
-    name: string
-    browser_download_url: string
-  }>
-
-  const standard = assets.find(
-    (a) => /ReShade_[\d.]+\.exe$/.test(a.name) && !a.name.includes('Addon')
-  )
-  const addon = assets.find((a) => a.name.includes('Addon'))
-
-  if (!standard) throw new Error('Could not find ReShade installer in release assets')
-
-  return {
-    version,
-    downloadUrl: standard.browser_download_url,
-    addonDownloadUrl: addon?.browser_download_url ?? null
+export function getBundledRelease(): ReShadeRelease {
+  const manifestPath = path.join(getReshadeResourcesDir(), 'manifest.json')
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error('ReShade is not bundled. Run: npm run download-reshade')
   }
+  return JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
 }
 
 // ─── Installer ────────────────────────────────────────────────────────────────
 
-async function downloadInstaller(url: string, version: string): Promise<string> {
-  if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true })
-
-  const destPath = path.join(TEMP_DIR, `ReShade_${version}.exe`)
-  if (fs.existsSync(destPath)) return destPath
-
-  const res = await net.fetch(url, {
-    headers: { 'User-Agent': 'gb-mod-manager' }
-  })
-  if (!res.ok) throw new Error(`ReShade download failed: ${res.status}`)
-
-  const buffer = await res.arrayBuffer()
-  fs.writeFileSync(destPath, Buffer.from(buffer))
-  return destPath
+export function getInstallerPath(addon = false): string {
+  const dir = getReshadeResourcesDir()
+  const file = addon ? 'ReShade_Addon.exe' : 'ReShade.exe'
+  const fullPath = path.join(dir, file)
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Bundled installer not found: ${file}. Run: npm run download-reshade`)
+  }
+  return fullPath
 }
 
-export async function runInstaller(version: string, downloadUrl: string): Promise<void> {
-  const installerPath = await downloadInstaller(downloadUrl, version)
-  return new Promise((resolve, reject) => {
-    const proc = spawn(installerPath, [], { detached: false, stdio: 'ignore' })
-    proc.on('error', reject)
-    proc.on('close', () => resolve())
-  })
+export function launchInstaller(addon = false): void {
+  const installerPath = getInstallerPath(addon)
+  if (process.platform === 'win32') {
+    exec(`"${installerPath}"`)
+  } else {
+    exec(`open "${installerPath}"`)
+  }
 }
 
 // ─── Status ───────────────────────────────────────────────────────────────────
+
+const RESHADE_DLLS = ['dxgi.dll', 'd3d11.dll', 'd3d12.dll', 'd3d9.dll', 'opengl32.dll']
+const RESHADE_INI = 'ReShade.ini'
+const PRESETS_SUBDIR = 'reshade-presets'
 
 export function checkInstalled(gameDir: string): ReShadeStatus {
   if (!fs.existsSync(gameDir)) return { installed: false }
@@ -99,7 +76,7 @@ export function checkInstalled(gameDir: string): ReShadeStatus {
 }
 
 export function uninstallReShade(gameDir: string): void {
-  const filesToRemove = ['ReShade.ini', 'ReShade.log', ...RESHADE_DLLS]
+  const filesToRemove = [RESHADE_INI, 'ReShade.log', ...RESHADE_DLLS]
   for (const file of filesToRemove) {
     const p = path.join(gameDir, file)
     try { if (fs.existsSync(p)) fs.unlinkSync(p) } catch { /* skip locked */ }
@@ -128,9 +105,7 @@ function getActivePresetFileName(gameDir: string): string | null {
 export function listPresets(gameDir: string): ReShadePreset[] {
   const presetsDir = getPresetsDir(gameDir)
   if (!fs.existsSync(presetsDir)) return []
-
   const activeFileName = getActivePresetFileName(gameDir)
-
   return fs
     .readdirSync(presetsDir)
     .filter((f) => f.toLowerCase().endsWith('.ini'))
@@ -163,7 +138,6 @@ export function setActivePreset(gameDir: string, presetFileName: string): void {
 export function importPreset(gameDir: string, sourcePath: string): string {
   const presetsDir = getPresetsDir(gameDir)
   if (!fs.existsSync(presetsDir)) fs.mkdirSync(presetsDir, { recursive: true })
-
   const fileName = path.basename(sourcePath)
   fs.copyFileSync(sourcePath, path.join(presetsDir, fileName))
   return fileName
@@ -172,7 +146,6 @@ export function importPreset(gameDir: string, sourcePath: string): string {
 export function createPreset(gameDir: string, name: string): string {
   const presetsDir = getPresetsDir(gameDir)
   if (!fs.existsSync(presetsDir)) fs.mkdirSync(presetsDir, { recursive: true })
-
   const fileName = `${name.replace(/[<>:"/\\|?*]/g, '_')}.ini`
   fs.writeFileSync(
     path.join(presetsDir, fileName),
