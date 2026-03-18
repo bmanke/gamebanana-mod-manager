@@ -1,9 +1,12 @@
-// src/api/updates.ts
-import pkg from '../../package.json' with { type: 'json' }
+import pkg from '../../package.json' assert { type: 'json' }
 
+// GitHub repo owner/name
 const OWNER = 'bmanke'
 const REPO = 'gamebanana-mod-manager'
-const CURRENT_VERSION = `v${pkg.version}`  // matches tags like v0.4.0
+
+// We tag releases like v0.1.0, v0.1.1, etc.
+// package.json has "version": "0.1.0"
+const CURRENT_VERSION = `v${pkg.version}`
 
 export interface UpdateInfo {
   hasUpdate: boolean
@@ -38,9 +41,12 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
       return { hasUpdate: false, latestTag: null, htmlUrl: null }
     }
 
+    // If the tag from GitHub differs from our current version, there’s an update.
     const hasUpdate = latestTag !== CURRENT_VERSION
+
     return { hasUpdate, latestTag, htmlUrl }
   } catch {
+    // Network / rate-limit / offline: fail silently and don’t block startup.
     return { hasUpdate: false, latestTag: null, htmlUrl: null }
   }
 }
