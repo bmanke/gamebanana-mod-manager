@@ -100,6 +100,16 @@ const GAME_CATEGORY_PRESETS: Record<number, GBCategory[]> = {
   ]
 }
 
+// ─── Helpers: mature filter ───────────────────────────────────────────────────
+
+// Treat any mod with content ratings or non-"show" visibility as mature.[web:339][web:367]
+function isMatureMod(mod: GBModSummary): boolean {
+  if (mod._bHasContentRatings) return true
+  const vis = mod._sInitialVisibility?.toLowerCase()
+  if (vis && vis !== 'show') return true
+  return false
+}
+
 // ─── Game Selector ────────────────────────────────────────────────────────────
 
 function GameSelector({
@@ -523,6 +533,11 @@ export default function Browse() {
   const [totalPages, setTotalPages] = useState(1)
   const [selectedModId, setSelectedModId] = useState<number | null>(null)
   const [installedMods, setInstalledMods] = useState<Set<number>>(new Set())
+  const [includeMature, setIncludeMature] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    const raw = window.localStorage.getItem('includeMature')
+    return raw === 'true'
+  })
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -530,6 +545,11 @@ export default function Browse() {
       setInstalledMods(new Set(Object.keys(mods).map(Number)))
     })
   }, [])
+
+  // persist preference
+  useEffect(() => {
+    window.localStorage.setItem('includeMature', String(includeMature))
+  }, [includeMature])
 
   const fetchMods = useCallback(async (targetPage: number) => {
     setLoading(true)
@@ -543,7 +563,10 @@ export default function Browse() {
         page: targetPage,
         perPage: 24
       })
-      setMods(result.records)
+      const records = includeMature
+        ? result.records
+        : result.records.filter((m) => !isMatureMod(m))
+      setMods(records)
       setPage(targetPage)
       setTotalPages(result.totalPages)
     } catch {
@@ -551,7 +574,7 @@ export default function Browse() {
     } finally {
       setLoading(false)
     }
-  }, [query, selectedGame, selectedCategory, sort])
+  }, [query, selectedGame, selectedCategory, sort, includeMature])
 
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current)
@@ -637,6 +660,18 @@ export default function Browse() {
           onChange={(e) => setQuery(e.target.value)}
           className="flex-1 min-w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 outline-none focus:border-yellow-500 transition-colors"
         />
+
+        {/* 18+ / Mature toggle */}
+        <label className="inline-flex items-center gap-2 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            checked={includeMature}
+            onChange={(e) => setIncludeMature(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-yellow-500 focus:ring-yellow-500"
+          />
+          <span>Include 18+ / mature</span>
+        </label>
+
         <GameSelector
           selectedGame={selectedGame}
           onSelect={handleGameSelect}

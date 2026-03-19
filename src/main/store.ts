@@ -1,81 +1,144 @@
-import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
 
 export interface InstalledMod {
   id: number
   name: string
   gameName: string
-  gameId?: number
+  gameId: number
   fileId: number
   fileName: string
-  installedTimestamp: number
   downloadUrl: string
   installPath: string
+  installedTimestamp: number
+  profileUrl?: string | null
+  gbId?: number | null
 }
 
-export interface StoreData {
-  mods: Record<number, InstalledMod>
-  gamePaths: Record<number, string>      // gameId -> mod install folder
-  gameExePaths: Record<number, string>   // gameId -> game exe directory (for ReShade)
+interface GamePathMap {
+  [gameId: number]: string
 }
 
-const storePath = path.join(app.getPath('userData'), 'mods.json')
+interface GameExePathMap {
+  [gameId: number]: string
+}
 
-function read(): StoreData {
+interface StoreData {
+  mods: { [id: number]: InstalledMod }
+  gamePaths: GamePathMap
+  gameExePaths: GameExePathMap
+}
+
+const STORE_DIR = path.join(os.homedir(), '.gb-mod-manager')
+const STORE_FILE = path.join(STORE_DIR, 'store.json')
+
+function ensureStoreDir() {
+  if (!fs.existsSync(STORE_DIR)) {
+    fs.mkdirSync(STORE_DIR, { recursive: true })
+  }
+}
+
+function loadData(): StoreData {
+  ensureStoreDir()
+  if (!fs.existsSync(STORE_FILE)) {
+    return { mods: {}, gamePaths: {}, gameExePaths: {} }
+  }
   try {
-    return JSON.parse(fs.readFileSync(storePath, 'utf-8'))
+    const raw = fs.readFileSync(STORE_FILE, 'utf-8')
+    const parsed = JSON.parse(raw)
+    return {
+      mods: parsed.mods ?? {},
+      gamePaths: parsed.gamePaths ?? {},
+      gameExePaths: parsed.gameExePaths ?? {}
+    }
   } catch {
     return { mods: {}, gamePaths: {}, gameExePaths: {} }
   }
 }
 
-function write(data: StoreData): void {
-  fs.writeFileSync(storePath, JSON.stringify(data, null, 2))
+function saveData(data: StoreData) {
+  ensureStoreDir()
+  fs.writeFileSync(STORE_FILE, JSON.stringify(data, null, 2), 'utf-8')
 }
 
-export const store = {
-  // ─── Mods ──────────────────────────────────────────────────────────────────
-  getAll: (): Record<number, InstalledMod> => read().mods,
-  get: (modId: number): InstalledMod | undefined => read().mods[modId],
-  set: (modId: number, mod: InstalledMod): void => {
-    const data = read()
-    data.mods[modId] = mod
-    write(data)
-  },
-  remove: (modId: number): void => {
-    const data = read()
-    delete data.mods[modId]
-    write(data)
-  },
+class Store {
+  private data: StoreData
 
-  // ─── Mod Install Paths ─────────────────────────────────────────────────────
-  getAllGamePaths: (): Record<number, string> => read().gamePaths ?? {},
-  getGamePath: (gameId: number): string | undefined => (read().gamePaths ?? {})[gameId],
-  setGamePath: (gameId: number, folderPath: string): void => {
-    const data = read()
-    if (!data.gamePaths) data.gamePaths = {}
-    data.gamePaths[gameId] = folderPath
-    write(data)
-  },
-  removeGamePath: (gameId: number): void => {
-    const data = read()
-    if (data.gamePaths) delete data.gamePaths[gameId]
-    write(data)
-  },
+  constructor() {
+    this.data = loadData()
+  }
 
-  // ─── Game Exe Paths (for ReShade) ──────────────────────────────────────────
-  getAllGameExePaths: (): Record<number, string> => read().gameExePaths ?? {},
-  getGameExePath: (gameId: number): string | undefined => (read().gameExePaths ?? {})[gameId],
-  setGameExePath: (gameId: number, dirPath: string): void => {
-    const data = read()
-    if (!data.gameExePaths) data.gameExePaths = {}
-    data.gameExePaths[gameId] = dirPath
-    write(data)
-  },
-  removeGameExePath: (gameId: number): void => {
-    const data = read()
-    if (data.gameExePaths) delete data.gameExePaths[gameId]
-    write(data)
+  // ─── Mods ───────────────────────────────────────────────────────────────────
+  get(id: number): InstalledMod | undefined {
+    return this.data.mods[id]
+  }
+
+  set(id: number, mod: InstalledMod) {
+    this.data.mods[id] = mod
+    saveData(this.data)
+  }
+
+  remove(id: number) {
+    delete this.data.mods[id]
+    saveData(this.data)
+  }
+
+  getAll(): { [id: number]: InstalledMod } {
+    return { ...this.data.mods }
+  }
+
+  setProfileUrl(modId: number, url: string | null) {
+    const mod = this.data.mods[modId]
+    if (!mod) return
+    mod.profileUrl = url
+    this.set(modId, mod)
+  }
+
+  setGbId(modId: number, gbId: number | null) {
+    const mod = this.data.mods[modId]
+    if (!mod) return
+    mod.gbId = gbId
+    this.set(modId, mod)
+  }
+
+  // ─── Game paths ─────────────────────────────────────────────────────────────
+  getGamePath(gameId: number): string | undefined {
+    return this.data.gamePaths[gameId]
+  }
+
+  setGamePath(gameId: number, folderPath: string) {
+    this.data.gamePaths[gameId] = folderPath
+    saveData(this.data)
+  }
+
+  removeGamePath(gameId: number) {
+    delete this.data.gamePaths[gameId]
+    saveData(this.data)
+  }
+
+  getAllGamePaths(): GamePathMap {
+    return { ...this.data.gamePaths }
+  }
+
+  // ─── Game exe paths (ReShade) ───────────────────────────────────────────────
+  getGameExePath(gameId: number): string | undefined {
+    return this.data.gameExePaths[gameId]
+  }
+
+  setGameExePath(gameId: number, dirPath: string) {
+    this.data.gameExePaths[gameId] = dirPath
+    saveData(this.data)
+  }
+
+  removeGameExePath(gameId: number) {
+    delete this.data.gameExePaths[gameId]
+    saveData(this.data)
+  }
+
+  getAllGameExePaths(): GameExePathMap {
+    return { ...this.data.gameExePaths }
   }
 }
+
+export const store = new Store()

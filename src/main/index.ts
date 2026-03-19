@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, net, dialog } from 'electron'
-import { join } from 'path'
+import { join, basename, dirname } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { installMod, uninstallMod, getModsDir } from './downloader'
@@ -16,6 +16,36 @@ import {
   deletePreset,
   openPresetsDir
 } from './reshade'
+import fs from 'fs'
+import path from 'path'
+
+// ─── Types for scanning existing mods ─────────────────────────────────────────
+
+export interface DetectedMod {
+  id: number | null
+  name: string
+  gameId: number
+  gameName: string
+  path: string
+  profileUrl?: string | null
+}
+
+function resolveGameName(gameId: number): string {
+  switch (gameId) {
+    case 8552: return 'Genshin Impact'
+    case 18366: return 'Honkai: Star Rail'
+    case 19567: return 'Zenless Zone Zero'
+    case 20357: return 'Wuthering Waves'
+    case 21842: return 'Arknights: Endfield'
+    default: return 'Unknown Game'
+  }
+}
+
+// extract numeric id from folder name like "660106 - Cool Mod"
+function tryParseIdFromName(name: string): number | null {
+  const match = name.match(/\b(\d{4,})\b/)
+  return match ? Number(match[1]) : null
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -42,7 +72,7 @@ function createWindow(): void {
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']!)
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
@@ -100,6 +130,66 @@ ipcMain.handle('mod:uninstall', async (_, modId: number) => {
 
 ipcMain.handle('mod:getAll', () => store.getAll())
 
+ipcMain.handle('mod:setProfileUrl', (_, modId: number, url: string | null) => {
+  store.setProfileUrl(modId, url)
+})
+
+ipcMain.handle('mod:setGbId', (_, modId: number, gbId: number | null) => {
+  store.setGbId(modId, gbId)
+})
+
+// rename by mod id (for manager-installed mods)
+ipcMain.handle('mod:renameWithGbId', async (_event, modId: number, gbId: number) => {
+  const mod = store.get(modId)
+  if (!mod) throw new Error(`Mod ${modId} not found`)
+
+  const oldPath = mod.installPath
+  if (!oldPath || !fs.existsSync(oldPath)) return null
+
+  const parentDir = dirname(oldPath)
+  const newName = `${mod.name}_${gbId}`
+  const newPath = path.join(parentDir, newName)
+
+  if (oldPath === newPath) return oldPath
+
+  fs.renameSync(oldPath, newPath)
+
+  mod.installPath = newPath
+  mod.gbId = gbId
+  store.set(modId, mod)
+
+  return newPath
+})
+
+// rename by path (works for scanned-only mods too)
+ipcMain.handle(
+  'mod:renamePathWithGbId',
+  async (_event, folderPath: string, displayName: string, gbId: number) => {
+    if (!folderPath || !fs.existsSync(folderPath)) return null
+
+    const parentDir = path.dirname(folderPath)
+    const newName = `${displayName}_${gbId}`
+    const newPath = path.join(parentDir, newName)
+
+    if (folderPath === newPath) return folderPath
+
+    fs.renameSync(folderPath, newPath)
+
+    // If this folder belongs to a stored mod, update it.
+    const all = store.getAll()
+    for (const mod of Object.values(all)) {
+      if (mod.installPath === folderPath) {
+        mod.installPath = newPath
+        mod.gbId = gbId
+        store.set(mod.id, mod)
+        break
+      }
+    }
+
+    return newPath
+  }
+)
+
 ipcMain.handle('mod:checkUpdates', async () => {
   const installed = Object.values(store.getAll())
   const updates: Array<{
@@ -110,9 +200,10 @@ ipcMain.handle('mod:checkUpdates', async () => {
   }> = []
 
   for (const mod of installed) {
+    const idToCheck = mod.gbId ?? mod.id
     try {
       const res = await net.fetch(
-        `https://gamebanana.com/apiv10/Mod/${mod.id}?_csvProperties=_aFiles`
+        `https://gamebanana.com/apiv10/Mod/${idToCheck}?_csvProperties=_aFiles`
       )
       const data = await res.json()
       const latest = data._aFiles?.at(-1)
@@ -132,6 +223,52 @@ ipcMain.handle('mod:checkUpdates', async () => {
 })
 
 ipcMain.handle('mod:openDir', () => shell.openPath(getModsDir()))
+
+// open arbitrary folder path (for scanned mods)
+ipcMain.handle('open-folder', (_, folderPath: string) => {
+  return shell.openPath(folderPath)
+})
+
+// scan for mods in the per‑game paths (Settings) or global mods dir
+ipcMain.handle('mods:scanInstalled', async () => {
+  const results: DetectedMod[] = []
+
+  const GAME_IDS = [8552, 18366, 19567, 20357, 21842]
+
+  for (const gameId of GAME_IDS) {
+    const customDir = store.getGamePath(gameId)
+    const baseDir = customDir ?? getModsDir()
+
+    if (!baseDir) continue
+    if (!fs.existsSync(baseDir)) continue
+
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(baseDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const fullPath = path.join(baseDir, entry.name)
+      const maybeId = tryParseIdFromName(entry.name)
+
+      results.push({
+        id: maybeId,
+        name: entry.name,
+        gameId,
+        gameName: resolveGameName(gameId),
+        path: fullPath,
+        profileUrl: maybeId
+          ? `https://gamebanana.com/mods/${maybeId}`
+          : null
+      })
+    }
+  }
+
+  return results
+})
 
 // ─── Mod Install Path Handlers ────────────────────────────────────────────────
 
@@ -267,7 +404,7 @@ ipcMain.handle('reshade:openPresetsDir', (_, gameId: number) => {
   shell.openPath(dir)
 })
 
-// ─── GameBanana Categories & Mods (currently unused; safe to keep) ────────────
+// ─── GameBanana Categories & Mods ─────────────────────────────────────────────
 
 ipcMain.handle('gb:getGameCategories', async (_, gameId: number) => {
   const url =
@@ -311,7 +448,6 @@ ipcMain.handle('gb:fetch', async (_, url: string) => {
   const buf = Buffer.from(await res.arrayBuffer())
   const text = buf.toString('utf-8')
 
-  // Try JSON first, fall back to plain text
   try {
     return JSON.parse(text)
   } catch {

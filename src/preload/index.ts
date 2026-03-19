@@ -2,6 +2,15 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 export type ProgressCallback = (pct: number) => void
 
+export interface DetectedMod {
+  id: number | null
+  name: string
+  gameId: number
+  gameName: string
+  path: string
+  profileUrl?: string | null
+}
+
 contextBridge.exposeInMainWorld('modApi', {
   // ─── Mod Installation ────────────────────────────────────────────────────────
   installMod: (
@@ -22,6 +31,25 @@ contextBridge.exposeInMainWorld('modApi', {
   getInstalledMods: (): Promise<Record<number, unknown>> =>
     ipcRenderer.invoke('mod:getAll'),
 
+  scanInstalledMods: (): Promise<DetectedMod[]> =>
+    ipcRenderer.invoke('mods:scanInstalled'),
+
+  setModProfileUrl: (modId: number, url: string | null): Promise<void> =>
+    ipcRenderer.invoke('mod:setProfileUrl', modId, url),
+
+  setModGbId: (modId: number, gbId: number | null): Promise<void> =>
+    ipcRenderer.invoke('mod:setGbId', modId, gbId),
+
+  renameModWithGbId: (modId: number, gbId: number): Promise<string | null> =>
+    ipcRenderer.invoke('mod:renameWithGbId', modId, gbId),
+
+  renameModPathWithGbId: (
+    folderPath: string,
+    displayName: string,
+    gbId: number
+  ): Promise<string | null> =>
+    ipcRenderer.invoke('mod:renamePathWithGbId', folderPath, displayName, gbId),
+
   // ─── Update Checking ─────────────────────────────────────────────────────────
   checkUpdates: (): Promise<
     Array<{ modId: number; newFileId: number; downloadUrl: string; fileName: string }>
@@ -37,6 +65,9 @@ contextBridge.exposeInMainWorld('modApi', {
   // ─── Utilities ───────────────────────────────────────────────────────────────
   openModsDir: (): Promise<void> =>
     ipcRenderer.invoke('mod:openDir'),
+
+  openFolder: (folderPath: string): Promise<void> =>
+    ipcRenderer.invoke('open-folder', folderPath),
 
   // ─── Mod Install Paths ───────────────────────────────────────────────────────
   pickFolder: (): Promise<string | null> =>
@@ -132,3 +163,80 @@ contextBridge.exposeInMainWorld('modApi', {
   gbFetch: (url: string): Promise<unknown> =>
     ipcRenderer.invoke('gb:fetch', url)
 })
+
+declare global {
+  interface Window {
+    modApi: {
+      installMod: (
+        modId: number,
+        fileId: number,
+        fileName: string,
+        downloadUrl: string,
+        name: string,
+        gameName: string,
+        gameId: number
+      ) => Promise<string>
+      uninstallMod: (modId: number) => Promise<void>
+      getInstalledMods: () => Promise<Record<number, unknown>>
+      scanInstalledMods: () => Promise<DetectedMod[]>
+      setModProfileUrl: (modId: number, url: string | null) => Promise<void>
+      setModGbId: (modId: number, gbId: number | null) => Promise<void>
+      renameModWithGbId: (modId: number, gbId: number) => Promise<string | null>
+      renameModPathWithGbId: (
+        folderPath: string,
+        displayName: string,
+        gbId: number
+      ) => Promise<string | null>
+      checkUpdates: () => Promise<
+        Array<{ modId: number; newFileId: number; downloadUrl: string; fileName: string }>
+      >
+      onProgress: (callback: ProgressCallback) => () => void
+      openModsDir: () => Promise<void>
+      openFolder: (folderPath: string) => Promise<void>
+
+      pickFolder: () => Promise<string | null>
+      getAllGamePaths: () => Promise<Record<number, string>>
+      setGamePath: (gameId: number, folderPath: string) => Promise<void>
+      removeGamePath: (gameId: number) => Promise<void>
+      openGamePath: (gameId: number) => Promise<void>
+
+      pickGameExeFolder: () => Promise<string | null>
+      getAllGameExePaths: () => Promise<Record<number, string>>
+      setGameExePath: (gameId: number, dirPath: string) => Promise<void>
+      removeGameExePath: (gameId: number) => Promise<void>
+      openGameExePath: (gameId: number) => Promise<void>
+
+      reshadeGetLatest: () => Promise<{ version: string; hasAddon: boolean }>
+      reshadeInstall: (gameId: number) => Promise<{ installed: boolean; dllName?: string }>
+      reshadeInstallAddon: (gameId: number) => Promise<{ installed: boolean; dllName?: string }>
+      reshadeCheckStatus: (gameId: number) => Promise<{ installed: boolean; dllName?: string }>
+      reshadeUninstall: (gameId: number) => Promise<{ installed: false }>
+      reshadeListPresets: (gameId: number) => Promise<Array<{
+        name: string; fileName: string; fullPath: string; isActive: boolean
+      }>>
+      reshadeSetActivePreset: (gameId: number, presetFileName: string) => Promise<Array<{
+        name: string; fileName: string; fullPath: string; isActive: boolean
+      }>>
+      reshadeImportPreset: (gameId: number) => Promise<Array<{
+        name: string; fileName: string; fullPath: string; isActive: boolean
+      }>>
+      reshadeCreatePreset: (gameId: number, name: string) => Promise<{
+        fileName: string
+        presets: Array<{ name: string; fileName: string; fullPath: string; isActive: boolean }>
+      }>
+      reshadeDeletePreset: (gameId: number, presetFileName: string) => Promise<Array<{
+        name: string; fileName: string; fullPath: string; isActive: boolean
+      }>>
+      reshadeOpenPresetsDir: (gameId: number) => Promise<void>
+
+      gbGetGameCategories: (gameId: number) => Promise<Array<{
+        id: number
+        name: string
+        url: string
+        parentId: number | null
+      }>>
+      gbGetGameMods: (gameId: number, categoryId?: number) => Promise<unknown>
+      gbFetch: (url: string) => Promise<unknown>
+    }
+  }
+}

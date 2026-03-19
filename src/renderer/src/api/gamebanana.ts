@@ -66,6 +66,7 @@ export interface GBMod {
     _idRow: number
     _sName: string
   }
+  _aContentRatings?: string[] | null
 }
 
 export interface GBModSummary {
@@ -87,6 +88,10 @@ export interface GBModSummary {
   _aCategory?: {
     _sName: string
   }
+
+  // for mature filtering
+  _bHasContentRatings?: boolean
+  _sInitialVisibility?: string
 }
 
 export interface GBGame {
@@ -161,7 +166,9 @@ const MOD_LIST_FIELDS = [
   '_aPreviewMedia',
   '_aSubmitter',
   '_aGame',
-  '_aCategory'
+  '_aCategory',
+  '_bHasContentRatings', // does it have any ratings at all
+  '_sInitialVisibility'  // e.g. 'show','withhold'
 ].join(',')
 
 const MOD_DETAIL_FIELDS = [
@@ -178,7 +185,8 @@ const MOD_DETAIL_FIELDS = [
   '_aFiles',
   '_aGame',
   '_aSubmitter',
-  '_aCategory'
+  '_aCategory',
+  '_aContentRatings'
 ].join(',')
 
 export async function searchMods(options: {
@@ -238,7 +246,7 @@ export async function searchMods(options: {
     _csvProperties: MOD_LIST_FIELDS
   }
 
-  // Sorting – mirrors typical usage; tweak if DevTools shows different keys
+  // Sorting
   switch (sort) {
     case 'popular':
       params._sOrderBy = '_nDownloadCount'
