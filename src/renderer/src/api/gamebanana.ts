@@ -187,42 +187,59 @@ export async function searchMods(options: {
   perPage?: number
   sort?: 'new' | 'popular' | 'updated'
 }): Promise<GBPagedResult<GBModSummary>> {
-  const {
-    gameId,
-    categoryId,
-    query,
-    page = 1,
-    perPage = 24,
-    sort = 'popular'
-  } = options
+  const { gameId, categoryId, query, page = 1, perPage = 24, sort = 'popular' } = options
 
-  // Decide which endpoint + base params we use
+  const trimmedQuery = query?.trim()
+  const usingSearch = !!trimmedQuery
+
+  // base params common to both paths
   const baseParams: Params = {
     _nPage: page,
     _nPerpage: perPage,
     _csvProperties: MOD_LIST_FIELDS
   }
 
-  const usingSearch = !!query?.trim()
   if (usingSearch) {
-    baseParams._sSearchString = query!.trim()
+    // Full‑game partial title search, scoped by game and category
+    baseParams._sSearchString = trimmedQuery!
     baseParams._sModelName = 'Mod'
-  } else {
-    switch (sort) {
-      case 'popular':
-        baseParams._sOrderBy = '_nDownloadCount'
-        baseParams._sOrder = 'DESC'
-        break
-      case 'updated':
-        baseParams._sOrderBy = '_tsDateUpdated'
-        baseParams._sOrder = 'DESC'
-        break
-      case 'new':
-      default:
-        baseParams._sOrderBy = '_tsDateAdded'
-        baseParams._sOrder = 'DESC'
-        break
+    baseParams._bStrict = 0 // allow partial / fuzzy matches
+
+    if (gameId != null) {
+      baseParams['_aFilters[Generic_Game]'] = gameId
     }
+    if (categoryId != null) {
+      baseParams['_aFilters[Generic_Category]'] = categoryId
+    }
+
+    const data = await get<RawListResponse<GBModSummary>>('/Util/Search/Results', baseParams)
+
+    const totalCount = data._aMetadata?._nRecordCount ?? 0
+    return {
+      records: data._aRecords ?? [],
+      totalCount,
+      page,
+      perPage,
+      totalPages: Math.ceil(totalCount / perPage) || 1
+    }
+  }
+
+  // ── Browse path (no query): strict /Mod/Index ──────────────────────────────
+
+  switch (sort) {
+    case 'popular':
+      baseParams._sOrderBy = '_nDownloadCount'
+      baseParams._sOrder = 'DESC'
+      break
+    case 'updated':
+      baseParams._sOrderBy = '_tsDateUpdated'
+      baseParams._sOrder = 'DESC'
+      break
+    case 'new':
+    default:
+      baseParams._sOrderBy = '_tsDateAdded'
+      baseParams._sOrder = 'DESC'
+      break
   }
 
   if (categoryId != null) {
@@ -232,9 +249,7 @@ export async function searchMods(options: {
     baseParams['_aFilters[Generic_Game]'] = gameId
   }
 
-  const endpoint = usingSearch ? '/Util/Search/Results' : '/Mod/Index'
-
-  const data = await get<RawListResponse<GBModSummary>>(endpoint, baseParams)
+  const data = await get<RawListResponse<GBModSummary>>('/Mod/Index', baseParams)
 
   const totalCount = data._aMetadata?._nRecordCount ?? 0
   return {
@@ -247,10 +262,7 @@ export async function searchMods(options: {
 }
 
 // Detail with summary fallback
-export async function getModDetails(
-  modId: number,
-  summary?: GBModSummary
-): Promise<GBMod> {
+export async function getModDetails(modId: number, summary?: GBModSummary): Promise<GBMod> {
   try {
     return await get<GBMod>(`/Mod/${modId}`, {
       _csvProperties: MOD_DETAIL_FIELDS
