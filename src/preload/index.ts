@@ -12,7 +12,7 @@ export interface DetectedMod {
 }
 
 contextBridge.exposeInMainWorld('modApi', {
-  // ─── Mod Installation ────────────────────────────────────────────────────────
+  // Mod Installation
   installMod: (
     modId: number,
     fileId: number,
@@ -22,12 +22,26 @@ contextBridge.exposeInMainWorld('modApi', {
     gameName: string,
     gameId: number
   ): Promise<string> =>
-    ipcRenderer.invoke('mod:install', modId, fileId, fileName, downloadUrl, name, gameName, gameId),
+    ipcRenderer.invoke(
+      'mod:install',
+      modId,
+      fileId,
+      fileName,
+      downloadUrl,
+      name,
+      gameName,
+      gameId
+    ),
 
   uninstallMod: (modId: number): Promise<void> =>
     ipcRenderer.invoke('mod:uninstall', modId),
 
-  // ─── Library ────────────────────────────────────────────────────────────────
+  enableMod: (modId: number): Promise<void> =>
+    ipcRenderer.invoke('mod:enable', modId),
+  disableMod: (modId: number): Promise<void> =>
+    ipcRenderer.invoke('mod:disable', modId),
+
+  // Library
   getInstalledMods: (): Promise<Record<number, unknown>> =>
     ipcRenderer.invoke('mod:getAll'),
 
@@ -50,26 +64,27 @@ contextBridge.exposeInMainWorld('modApi', {
   ): Promise<string | null> =>
     ipcRenderer.invoke('mod:renamePathWithGbId', folderPath, displayName, gbId),
 
-  // ─── Update Checking ─────────────────────────────────────────────────────────
+  // Update Checking
   checkUpdates: (): Promise<
     Array<{ modId: number; newFileId: number; downloadUrl: string; fileName: string }>
   > => ipcRenderer.invoke('mod:checkUpdates'),
 
-  // ─── Progress ────────────────────────────────────────────────────────────────
+  // Progress
   onProgress: (callback: ProgressCallback): (() => void) => {
-    const handler = (_: Electron.IpcRendererEvent, pct: number): void => callback(pct)
+    const handler = (_: Electron.IpcRendererEvent, pct: number): void =>
+      callback(pct)
     ipcRenderer.on('mod:progress', handler)
     return () => ipcRenderer.removeListener('mod:progress', handler)
   },
 
-  // ─── Utilities ───────────────────────────────────────────────────────────────
+  // Utilities
   openModsDir: (): Promise<void> =>
     ipcRenderer.invoke('mod:openDir'),
 
   openFolder: (folderPath: string): Promise<void> =>
     ipcRenderer.invoke('open-folder', folderPath),
 
-  // ─── Mod Install Paths ───────────────────────────────────────────────────────
+  // Mod Install Paths
   pickFolder: (): Promise<string | null> =>
     ipcRenderer.invoke('gamePath:pick'),
 
@@ -85,7 +100,7 @@ contextBridge.exposeInMainWorld('modApi', {
   openGamePath: (gameId: number): Promise<void> =>
     ipcRenderer.invoke('gamePath:open', gameId),
 
-  // ─── Game Exe Paths (for ReShade) ────────────────────────────────────────────
+  // Game Exe Paths (ReShade)
   pickGameExeFolder: (): Promise<string | null> =>
     ipcRenderer.invoke('gameExePath:pick'),
 
@@ -101,65 +116,106 @@ contextBridge.exposeInMainWorld('modApi', {
   openGameExePath: (gameId: number): Promise<void> =>
     ipcRenderer.invoke('gameExePath:open', gameId),
 
-  // ─── ReShade ─────────────────────────────────────────────────────────────────
+  // ReShade
   reshadeGetLatest: (): Promise<{ version: string; hasAddon: boolean }> =>
     ipcRenderer.invoke('reshade:getLatest'),
 
-  reshadeInstall: (gameId: number): Promise<{ installed: boolean; dllName?: string }> =>
+  reshadeInstall: (
+    gameId: number
+  ): Promise<{ installed: boolean; dllName?: string }> =>
     ipcRenderer.invoke('reshade:install', gameId),
 
-  reshadeInstallAddon: (gameId: number): Promise<{ installed: boolean; dllName?: string }> =>
+  reshadeInstallAddon: (
+    gameId: number
+  ): Promise<{ installed: boolean; dllName?: string }> =>
     ipcRenderer.invoke('reshade:installAddon', gameId),
 
-  reshadeCheckStatus: (gameId: number): Promise<{ installed: boolean; dllName?: string }> =>
+  reshadeCheckStatus: (
+    gameId: number
+  ): Promise<{ installed: boolean; dllName?: string }> =>
     ipcRenderer.invoke('reshade:checkStatus', gameId),
 
   reshadeUninstall: (gameId: number): Promise<{ installed: false }> =>
     ipcRenderer.invoke('reshade:uninstall', gameId),
 
-  // ─── ReShade Presets ─────────────────────────────────────────────────────────
-  reshadeListPresets: (gameId: number): Promise<Array<{
-    name: string; fileName: string; fullPath: string; isActive: boolean
-  }>> =>
-    ipcRenderer.invoke('reshade:listPresets', gameId),
+  reshadeListPresets: (
+    gameId: number
+  ): Promise<
+    Array<{
+      name: string
+      fileName: string
+      fullPath: string
+      isActive: boolean
+    }>
+  > => ipcRenderer.invoke('reshade:listPresets', gameId),
 
-  reshadeSetActivePreset: (gameId: number, presetFileName: string): Promise<Array<{
-    name: string; fileName: string; fullPath: string; isActive: boolean
-  }>> =>
-    ipcRenderer.invoke('reshade:setActivePreset', gameId, presetFileName),
+  reshadeSetActivePreset: (
+    gameId: number,
+    presetFileName: string
+  ): Promise<
+    Array<{
+      name: string
+      fileName: string
+      fullPath: string
+      isActive: boolean
+    }>
+  > => ipcRenderer.invoke('reshade:setActivePreset', gameId, presetFileName),
 
-  reshadeImportPreset: (gameId: number): Promise<Array<{
-    name: string; fileName: string; fullPath: string; isActive: boolean
-  }>> =>
-    ipcRenderer.invoke('reshade:importPreset', gameId),
+  reshadeImportPreset: (
+    gameId: number
+  ): Promise<
+    Array<{
+      name: string
+      fileName: string
+      fullPath: string
+      isActive: boolean
+    }>
+  > => ipcRenderer.invoke('reshade:importPreset', gameId),
 
-  reshadeCreatePreset: (gameId: number, name: string): Promise<{
+  reshadeCreatePreset: (
+    gameId: number,
+    name: string
+  ): Promise<{
     fileName: string
-    presets: Array<{ name: string; fileName: string; fullPath: string; isActive: boolean }>
-  }> =>
-    ipcRenderer.invoke('reshade:createPreset', gameId, name),
+    presets: Array<{
+      name: string
+      fileName: string
+      fullPath: string
+      isActive: boolean
+    }>
+  }> => ipcRenderer.invoke('reshade:createPreset', gameId, name),
 
-  reshadeDeletePreset: (gameId: number, presetFileName: string): Promise<Array<{
-    name: string; fileName: string; fullPath: string; isActive: boolean
-  }>> =>
-    ipcRenderer.invoke('reshade:deletePreset', gameId, presetFileName),
+  reshadeDeletePreset: (
+    gameId: number,
+    presetFileName: string
+  ): Promise<
+    Array<{
+      name: string
+      fileName: string
+      fullPath: string
+      isActive: boolean
+    }>
+  > => ipcRenderer.invoke('reshade:deletePreset', gameId, presetFileName),
 
   reshadeOpenPresetsDir: (gameId: number): Promise<void> =>
     ipcRenderer.invoke('reshade:openPresetsDir', gameId),
 
-  // ─── GameBanana categories & mods ────────────────────────────────────────────
-  gbGetGameCategories: (gameId: number): Promise<Array<{
-    id: number
-    name: string
-    url: string
-    parentId: number | null
-  }>> =>
-    ipcRenderer.invoke('gb:getGameCategories', gameId),
+  // GameBanana categories & mods
+  gbGetGameCategories: (
+    gameId: number
+  ): Promise<
+    Array<{
+      id: number
+      name: string
+      url: string
+      parentId: number | null
+    }>
+  > => ipcRenderer.invoke('gb:getGameCategories', gameId),
 
   gbGetGameMods: (gameId: number, categoryId?: number): Promise<unknown> =>
     ipcRenderer.invoke('gb:getGameMods', gameId, categoryId),
 
-  // ─── GB API Proxy ────────────────────────────────────────────────────────────
+  // GB API Proxy
   gbFetch: (url: string): Promise<unknown> =>
     ipcRenderer.invoke('gb:fetch', url)
 })
@@ -177,6 +233,9 @@ declare global {
         gameId: number
       ) => Promise<string>
       uninstallMod: (modId: number) => Promise<void>
+      enableMod: (modId: number) => Promise<void>
+      disableMod: (modId: number) => Promise<void>
+
       getInstalledMods: () => Promise<Record<number, unknown>>
       scanInstalledMods: () => Promise<DetectedMod[]>
       setModProfileUrl: (modId: number, url: string | null) => Promise<void>
@@ -207,34 +266,62 @@ declare global {
       openGameExePath: (gameId: number) => Promise<void>
 
       reshadeGetLatest: () => Promise<{ version: string; hasAddon: boolean }>
-      reshadeInstall: (gameId: number) => Promise<{ installed: boolean; dllName?: string }>
-      reshadeInstallAddon: (gameId: number) => Promise<{ installed: boolean; dllName?: string }>
-      reshadeCheckStatus: (gameId: number) => Promise<{ installed: boolean; dllName?: string }>
+      reshadeInstall: (
+        gameId: number
+      ) => Promise<{ installed: boolean; dllName?: string }>
+      reshadeInstallAddon: (
+        gameId: number
+      ) => Promise<{ installed: boolean; dllName?: string }>
+      reshadeCheckStatus: (
+        gameId: number
+      ) => Promise<{ installed: boolean; dllName?: string }>
       reshadeUninstall: (gameId: number) => Promise<{ installed: false }>
-      reshadeListPresets: (gameId: number) => Promise<Array<{
-        name: string; fileName: string; fullPath: string; isActive: boolean
-      }>>
-      reshadeSetActivePreset: (gameId: number, presetFileName: string) => Promise<Array<{
-        name: string; fileName: string; fullPath: string; isActive: boolean
-      }>>
-      reshadeImportPreset: (gameId: number) => Promise<Array<{
-        name: string; fileName: string; fullPath: string; isActive: boolean
-      }>>
-      reshadeCreatePreset: (gameId: number, name: string) => Promise<{
+      reshadeListPresets: (
+        gameId: number
+      ) => Promise<
+        Array<{ name: string; fileName: string; fullPath: string; isActive: boolean }>
+      >
+      reshadeSetActivePreset: (
+        gameId: number,
+        presetFileName: string
+      ) => Promise<
+        Array<{ name: string; fileName: string; fullPath: string; isActive: boolean }>
+      >
+      reshadeImportPreset: (
+        gameId: number
+      ) => Promise<
+        Array<{ name: string; fileName: string; fullPath: string; isActive: boolean }>
+      >
+      reshadeCreatePreset: (
+        gameId: number,
+        name: string
+      ) => Promise<{
         fileName: string
-        presets: Array<{ name: string; fileName: string; fullPath: string; isActive: boolean }>
+        presets: Array<{
+          name: string
+          fileName: string
+          fullPath: string
+          isActive: boolean
+        }>
       }>
-      reshadeDeletePreset: (gameId: number, presetFileName: string) => Promise<Array<{
-        name: string; fileName: string; fullPath: string; isActive: boolean
-      }>>
+      reshadeDeletePreset: (
+        gameId: number,
+        presetFileName: string
+      ) => Promise<
+        Array<{ name: string; fileName: string; fullPath: string; isActive: boolean }>
+      >
       reshadeOpenPresetsDir: (gameId: number) => Promise<void>
 
-      gbGetGameCategories: (gameId: number) => Promise<Array<{
-        id: number
-        name: string
-        url: string
-        parentId: number | null
-      }>>
+      gbGetGameCategories: (
+        gameId: number
+      ) => Promise<
+        Array<{
+          id: number
+          name: string
+          url: string
+          parentId: number | null
+        }>
+      >
       gbGetGameMods: (gameId: number, categoryId?: number) => Promise<unknown>
       gbFetch: (url: string) => Promise<unknown>
     }

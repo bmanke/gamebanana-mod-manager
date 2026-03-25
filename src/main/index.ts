@@ -19,7 +19,7 @@ import {
 import fs from 'fs'
 import path from 'path'
 
-// ─── Types for scanning existing mods ─────────────────────────────────────────
+// Types for scanning existing mods
 
 export interface DetectedMod {
   id: number | null
@@ -78,7 +78,79 @@ function createWindow(): void {
   }
 }
 
-// ─── Mod Handlers ─────────────────────────────────────────────────────────────
+function ensureDir(dir: string) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
+}
+
+function linkNameForMod(mod: InstalledMod): string {
+  return `${mod.name}_${mod.id}`
+}
+
+function makeDirLink(target: string, linkPath: string) {
+  if (fs.existsSync(linkPath)) return
+  const type: fs.symlink.Type = process.platform === 'win32' ? 'junction' : 'dir'
+  fs.symlinkSync(target, linkPath, type)
+}
+
+// Migration: move old installs into global MODS_DIR and create links per game
+
+function migrateModsToGlobalStore() {
+  const modsRoot = getModsDir()
+  ensureDir(modsRoot)
+
+  const all = store.getAll()
+  for (const mod of Object.values(all)) {
+    if (!mod.installPath) continue
+
+    const currentPath = mod.installPath
+    const enabled = mod.enabled ?? true
+
+    // Already under global modsRoot
+    if (currentPath.startsWith(modsRoot)) {
+      const gamePath = store.getGamePath(mod.gameId)
+      if (gamePath && enabled) {
+        ensureDir(gamePath)
+        const linkName = linkNameForMod(mod)
+        const linkPath = path.join(gamePath, linkName)
+        if (!fs.existsSync(linkPath)) {
+          makeDirLink(currentPath, linkPath)
+        }
+      }
+      continue
+    }
+
+    // Old location (per‑game folder). Move real dir into modsRoot
+    if (!fs.existsSync(currentPath)) continue
+
+    const oldPath = currentPath
+    const folderName = path.basename(oldPath)
+    let newPath = path.join(modsRoot, folderName)
+
+    let counter = 1
+    while (fs.existsSync(newPath)) {
+      newPath = path.join(modsRoot, `${folderName}_${counter++}`)
+    }
+
+    fs.renameSync(oldPath, newPath)
+    mod.installPath = newPath
+
+    const gamePath = store.getGamePath(mod.gameId)
+    if (gamePath && enabled) {
+      ensureDir(gamePath)
+      const linkName = linkNameForMod(mod)
+      const linkPath = path.join(gamePath, linkName)
+      if (!fs.existsSync(linkPath)) {
+        makeDirLink(newPath, linkPath)
+      }
+    }
+
+    store.set(mod.id, mod)
+  }
+}
+
+// Mod Handlers
 
 ipcMain.handle(
   'mod:install',
@@ -92,15 +164,14 @@ ipcMain.handle(
     gameName: string,
     gameId: number
   ) => {
-    const customPath = store.getGamePath(gameId)
-    const baseDir = customPath ?? getModsDir()
+    const modsRoot = getModsDir()
 
     const installPath = await installMod(
       modId,
       fileName,
       downloadUrl,
       name,
-      baseDir,
+      modsRoot,
       (pct) => event.sender.send('mod:progress', pct)
     )
 
@@ -113,9 +184,19 @@ ipcMain.handle(
       fileName,
       downloadUrl,
       installPath,
-      installedTimestamp: Date.now()
+      installedTimestamp: Date.now(),
+      enabled: true
     }
     store.set(modId, mod)
+
+    const gamePath = store.getGamePath(gameId)
+    if (gamePath) {
+      ensureDir(gamePath)
+      const linkName = linkNameForMod(mod)
+      const linkPath = path.join(gamePath, linkName)
+      makeDirLink(installPath, linkPath)
+    }
+
     return installPath
   }
 )
@@ -123,6 +204,15 @@ ipcMain.handle(
 ipcMain.handle('mod:uninstall', async (_, modId: number) => {
   const mod = store.get(modId)
   if (mod?.installPath) {
+    const gamePath = store.getGamePath(mod.gameId)
+    if (gamePath) {
+      const linkName = linkNameForMod(mod)
+      const linkPath = path.join(gamePath, linkName)
+      if (fs.existsSync(linkPath)) {
+        await fs.promises.rm(linkPath, { recursive: false, force: true })
+      }
+    }
+
     await uninstallMod(mod.installPath)
   }
   store.remove(modId)
@@ -136,6 +226,43 @@ ipcMain.handle('mod:setProfileUrl', (_, modId: number, url: string | null) => {
 
 ipcMain.handle('mod:setGbId', (_, modId: number, gbId: number | null) => {
   store.setGbId(modId, gbId)
+})
+
+// Enable / disable: add/remove symlink in per‑game path
+
+ipcMain.handle('mod:disable', async (_, modId: number) => {
+  const mod = store.get(modId)
+  if (!mod) return
+  if (mod.enabled === false) return
+
+  const gamePath = store.getGamePath(mod.gameId)
+  if (gamePath) {
+    const linkName = linkNameForMod(mod)
+    const linkPath = path.join(gamePath, linkName)
+    if (fs.existsSync(linkPath)) {
+      await fs.promises.rm(linkPath, { recursive: false, force: true })
+    }
+  }
+
+  store.setEnabled(modId, false)
+})
+
+ipcMain.handle('mod:enable', async (_, modId: number) => {
+  const mod = store.get(modId)
+  if (!mod) return
+  if (mod.enabled === true) return
+
+  const gamePath = store.getGamePath(mod.gameId)
+  if (gamePath) {
+    ensureDir(gamePath)
+    const linkName = linkNameForMod(mod)
+    const linkPath = path.join(gamePath, linkName)
+    if (!fs.existsSync(linkPath)) {
+      makeDirLink(mod.installPath, linkPath)
+    }
+  }
+
+  store.setEnabled(modId, true)
 })
 
 // rename by mod id (for manager-installed mods)
@@ -175,7 +302,6 @@ ipcMain.handle(
 
     fs.renameSync(folderPath, newPath)
 
-    // If this folder belongs to a stored mod, update it.
     const all = store.getAll()
     for (const mod of Object.values(all)) {
       if (mod.installPath === folderPath) {
@@ -216,7 +342,7 @@ ipcMain.handle('mod:checkUpdates', async () => {
         })
       }
     } catch {
-      // ignore errors for individual mods
+      // ignore errors per mod
     }
   }
   return updates
@@ -224,12 +350,11 @@ ipcMain.handle('mod:checkUpdates', async () => {
 
 ipcMain.handle('mod:openDir', () => shell.openPath(getModsDir()))
 
-// open arbitrary folder path (for scanned mods)
 ipcMain.handle('open-folder', (_, folderPath: string) => {
   return shell.openPath(folderPath)
 })
 
-// scan for mods in the per‑game paths (Settings) or global mods dir
+// scan for mods in the per‑game paths or global mods dir
 ipcMain.handle('mods:scanInstalled', async () => {
   const results: DetectedMod[] = []
 
@@ -270,7 +395,7 @@ ipcMain.handle('mods:scanInstalled', async () => {
   return results
 })
 
-// ─── Mod Install Path Handlers ────────────────────────────────────────────────
+// Mod Install Path Handlers
 
 ipcMain.handle('gamePath:pick', async () => {
   const result = await dialog.showOpenDialog({
@@ -295,7 +420,7 @@ ipcMain.handle('gamePath:open', (_, gameId: number) => {
   if (p) shell.openPath(p)
 })
 
-// ─── Game Exe Path Handlers (for ReShade) ─────────────────────────────────────
+// Game Exe Path Handlers (ReShade)
 
 ipcMain.handle('gameExePath:pick', async () => {
   const result = await dialog.showOpenDialog({
@@ -320,25 +445,34 @@ ipcMain.handle('gameExePath:open', (_, gameId: number) => {
   if (p) shell.openPath(p)
 })
 
-// ─── ReShade Handlers ─────────────────────────────────────────────────────────
+// ReShade Handlers (unchanged except your Arknights block if you add it)
 
 ipcMain.handle('reshade:getLatest', () => {
   return getBundledRelease()
 })
 
 ipcMain.handle('reshade:install', (_, gameId: number) => {
+  if (gameId === 21842) {
+    throw new Error('ReShade is disabled for Arknights: Endfield because it can break the game.')
+  }
   launchInstaller(false)
   const gameDir = store.getGameExePath(gameId)
   return gameDir ? checkInstalled(gameDir) : { installed: false }
 })
 
 ipcMain.handle('reshade:installAddon', (_, gameId: number) => {
+  if (gameId === 21842) {
+    throw new Error('ReShade addon is disabled for Arknights: Endfield.')
+  }
   launchInstaller(true)
   const gameDir = store.getGameExePath(gameId)
   return gameDir ? checkInstalled(gameDir) : { installed: false }
 })
 
 ipcMain.handle('reshade:checkStatus', (_, gameId: number) => {
+  if (gameId === 21842) {
+    return { installed: false }
+  }
   const gameDir = store.getGameExePath(gameId)
   if (!gameDir) return { installed: false }
   return checkInstalled(gameDir)
@@ -351,7 +485,8 @@ ipcMain.handle('reshade:uninstall', (_, gameId: number) => {
   return { installed: false }
 })
 
-// ─── ReShade Preset Handlers ──────────────────────────────────────────────────
+// ReShade preset handlers (unchanged)
+// ... keep your existing reshade:listPresets, setActivePreset, etc. ...
 
 ipcMain.handle('reshade:listPresets', (_, gameId: number) => {
   const gameDir = store.getGameExePath(gameId)
@@ -404,7 +539,7 @@ ipcMain.handle('reshade:openPresetsDir', (_, gameId: number) => {
   shell.openPath(dir)
 })
 
-// ─── GameBanana Categories & Mods ─────────────────────────────────────────────
+// GameBanana categories & mods
 
 ipcMain.handle('gb:getGameCategories', async (_, gameId: number) => {
   const url =
@@ -437,8 +572,6 @@ ipcMain.handle('gb:getGameMods', async (_ , gameId: number, categoryId?: number)
   return res.json()
 })
 
-// ─── GB API Proxy ─────────────────────────────────────────────────────────────
-
 ipcMain.handle('gb:fetch', async (_, url: string) => {
   const res = await net.fetch(url)
   if (!res.ok) {
@@ -455,10 +588,12 @@ ipcMain.handle('gb:fetch', async (_, url: string) => {
   }
 })
 
-// ─── App Lifecycle ────────────────────────────────────────────────────────────
+// App Lifecycle
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.modmanager')
+
+  migrateModsToGlobalStore()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

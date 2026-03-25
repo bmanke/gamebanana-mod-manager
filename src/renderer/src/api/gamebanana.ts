@@ -1,21 +1,5 @@
 const BASE = 'https://gamebanana.com/apiv11'
 
-// ─── Default categories per game ──────────────────────────────────────────────
-// Kept for reference; we only filter by category when categoryId is passed.
-
-const DEFAULT_CATEGORY_IDS: Record<number, number[]> = {
-  // Genshin Impact – Characters
-  8552: [18140],
-  // Honkai: Star Rail – Characters
-  18366: [22832],
-  // Zenless Zone Zero – Skins
-  19567: [30305],
-  // Wuthering Waves – Skins
-  20357: [29524],
-  // Arknights: Endfield – Operators
-  21842: [42727]
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface GBFile {
@@ -119,13 +103,14 @@ export interface UpdateAvailable {
 
 // ─── Core Helper ──────────────────────────────────────────────────────────────
 
-async function get<T>(
-  endpoint: string,
-  params: Record<string, string | number> = {}
-): Promise<T> {
+type Params = Record<string, string | number>
+
+async function get<T>(endpoint: string, params?: Params): Promise<T> {
   const url = new URL(`${BASE}${endpoint}`)
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, String(value))
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, String(value))
+    }
   }
   return window.modApi.gbFetch(url.toString()) as Promise<T>
 }
@@ -167,8 +152,8 @@ const MOD_LIST_FIELDS = [
   '_aSubmitter',
   '_aGame',
   '_aCategory',
-  '_bHasContentRatings', // does it have any ratings at all
-  '_sInitialVisibility'  // e.g. 'show','withhold'
+  '_bHasContentRatings',
+  '_sInitialVisibility'
 ].join(',')
 
 const MOD_DETAIL_FIELDS = [
@@ -189,6 +174,11 @@ const MOD_DETAIL_FIELDS = [
   '_aContentRatings'
 ].join(',')
 
+interface RawListResponse<T> {
+  _aRecords: T[]
+  _aMetadata: { _nRecordCount: number }
+}
+
 export async function searchMods(options: {
   gameId?: number
   categoryId?: number
@@ -206,74 +196,45 @@ export async function searchMods(options: {
     sort = 'popular'
   } = options
 
-  // ── Full‑text search path ───────────────────────────────────────────────────
-  if (query?.trim()) {
-    const params: Record<string, string | number> = {
-      _sSearchString: query.trim(),
-      _nPage: page,
-      _nPerpage: perPage,
-      _sModelName: 'Mod',
-      _csvProperties: MOD_LIST_FIELDS
-    }
-
-    // Match how v11 category lists work: _aFilters[Generic_Category]=18140
-    if (categoryId != null) {
-      params['_aFilters[Generic_Category]'] = categoryId
-    }
-    if (gameId != null) {
-      params['_aFilters[Generic_Game]'] = gameId
-    }
-
-    const data = await get<{
-      _aRecords: GBModSummary[]
-      _aMetadata: { _nRecordCount: number }
-    }>('/Util/Search/Results', params)
-
-    const totalCount = data._aMetadata?._nRecordCount ?? 0
-    return {
-      records: data._aRecords ?? [],
-      totalCount,
-      page,
-      perPage,
-      totalPages: Math.ceil(totalCount / perPage) || 1
-    }
-  }
-
-  // ── Browse path (no search query) ───────────────────────────────────────────
-  const params: Record<string, string | number> = {
+  // Decide which endpoint + base params we use
+  const baseParams: Params = {
     _nPage: page,
     _nPerpage: perPage,
     _csvProperties: MOD_LIST_FIELDS
   }
 
-  // Sorting
-  switch (sort) {
-    case 'popular':
-      params._sOrderBy = '_nDownloadCount'
-      params._sOrder = 'DESC'
-      break
-    case 'updated':
-      params._sOrderBy = '_tsDateUpdated'
-      params._sOrder = 'DESC'
-      break
-    case 'new':
-    default:
-      params._sOrderBy = '_tsDateAdded'
-      params._sOrder = 'DESC'
-      break
+  const usingSearch = !!query?.trim()
+  if (usingSearch) {
+    baseParams._sSearchString = query!.trim()
+    baseParams._sModelName = 'Mod'
+  } else {
+    switch (sort) {
+      case 'popular':
+        baseParams._sOrderBy = '_nDownloadCount'
+        baseParams._sOrder = 'DESC'
+        break
+      case 'updated':
+        baseParams._sOrderBy = '_tsDateUpdated'
+        baseParams._sOrder = 'DESC'
+        break
+      case 'new':
+      default:
+        baseParams._sOrderBy = '_tsDateAdded'
+        baseParams._sOrder = 'DESC'
+        break
+    }
   }
 
   if (categoryId != null) {
-    params['_aFilters[Generic_Category]'] = categoryId
+    baseParams['_aFilters[Generic_Category]'] = categoryId
   }
   if (gameId != null) {
-    params['_aFilters[Generic_Game]'] = gameId
+    baseParams['_aFilters[Generic_Game]'] = gameId
   }
 
-  const data = await get<{
-    _aRecords: GBModSummary[]
-    _aMetadata: { _nRecordCount: number }
-  }>('/Mod/Index', params)
+  const endpoint = usingSearch ? '/Util/Search/Results' : '/Mod/Index'
+
+  const data = await get<RawListResponse<GBModSummary>>(endpoint, baseParams)
 
   const totalCount = data._aMetadata?._nRecordCount ?? 0
   return {
@@ -285,10 +246,49 @@ export async function searchMods(options: {
   }
 }
 
-export async function getModDetails(modId: number): Promise<GBMod> {
-  return get<GBMod>(`/Mod/${modId}`, {
-    _csvProperties: MOD_DETAIL_FIELDS
-  })
+// Detail with summary fallback
+export async function getModDetails(
+  modId: number,
+  summary?: GBModSummary
+): Promise<GBMod> {
+  try {
+    return await get<GBMod>(`/Mod/${modId}`, {
+      _csvProperties: MOD_DETAIL_FIELDS
+    })
+  } catch {
+    if (!summary) {
+      throw new Error(`Failed to fetch mod ${modId} and no summary was provided`)
+    }
+
+    return {
+      _idRow: summary._idRow,
+      _sName: summary._sName,
+      _sProfileUrl: summary._sProfileUrl,
+      _sText: '',
+      _nLikeCount: summary._nLikeCount,
+      _nViewCount: 0,
+      _nDownloadCount: summary._nDownloadCount,
+      _tsDateAdded: summary._tsDateUpdated,
+      _tsDateUpdated: summary._tsDateUpdated,
+      _aPreviewMedia: summary._aPreviewMedia,
+      _aFiles: [],
+      _aGame: {
+        _idRow: summary._aGame?._idRow ?? 0,
+        _sName: summary._aGame?._sName ?? 'Unknown game',
+        _sProfileUrl: ''
+      },
+      _aSubmitter: {
+        _idRow: 0,
+        _sName: summary._aSubmitter?._sName ?? 'Unknown',
+        _sProfileUrl: summary._aSubmitter?._sProfileUrl ?? ''
+      },
+      _aCategory: {
+        _idRow: 0,
+        _sName: summary._aCategory?._sName ?? ''
+      },
+      _aContentRatings: summary._bHasContentRatings ? ['has-ratings'] : null
+    }
+  }
 }
 
 export async function getModFiles(modId: number): Promise<GBFile[]> {

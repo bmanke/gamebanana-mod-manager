@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { formatDate, checkModsForUpdates, UpdateAvailable } from '../api/gamebanana'
 import type { InstalledMod } from '../../../main/store'
 import type { DetectedMod } from '../../../main/index'
@@ -6,6 +6,7 @@ import type { DetectedMod } from '../../../main/index'
 type LibraryMod = InstalledMod & {
   path?: string
   profileUrl?: string | null
+  enabled?: boolean
 }
 
 // Keep in sync with your main/index.ts game ids
@@ -18,8 +19,10 @@ const GAME_OPTIONS: Array<{ id: number; name: string }> = [
   { id: 21842, name: 'Arknights: Endfield' }
 ]
 
+// ─── Small helpers ────────────────────────────────────────────────────────────
+
 function UpdateBadge({ count }: { count: number }) {
-  if (count === 0) return null
+  if (!count) return null
   return (
     <span className="ml-2 bg-yellow-500 text-black text-xs font-bold rounded-full px-2 py-0.5">
       {count}
@@ -42,15 +45,22 @@ function extractGbId(value: string | null): number | null {
   if (!trimmed) return null
   if (/^\d+$/.test(trimmed)) return Number(trimmed)
   const m = trimmed.match(/mods\/(\d+)/)
-  if (m) return Number(m[1])
-  return null
+  return m ? Number(m[1]) : null
 }
 
 // Hide trailing _<id> for display only
-function stripIdSuffix(name: string | undefined): string {
+function stripIdSuffix(name?: string): string {
   if (!name) return ''
   return name.replace(/_(\d{4,})$/, '')
 }
+
+function buildGbUrl(mod: LibraryMod): string | null {
+  if (mod.profileUrl) return mod.profileUrl
+  const id = mod.gbId ?? mod.id
+  return id ? `https://gamebanana.com/mods/${id}` : null
+}
+
+// ─── Row ──────────────────────────────────────────────────────────────────────
 
 function ModRow({
   mod,
@@ -58,7 +68,9 @@ function ModRow({
   onUninstall,
   onUpdate,
   updating,
-  onChangeGame
+  onChangeGame,
+  onToggleEnabled,
+  onChangeMeta
 }: {
   mod: LibraryMod
   hasUpdate: UpdateAvailable | null
@@ -66,34 +78,36 @@ function ModRow({
   onUpdate: (mod: LibraryMod, update: UpdateAvailable) => void
   updating: boolean
   onChangeGame: (id: number, gameId: number) => void
+  onToggleEnabled: (id: number, enabled: boolean) => void
+  onChangeMeta: (id: number, patch: Partial<LibraryMod>) => void
 }) {
   const [confirming, setConfirming] = useState(false)
   const [editingLink, setEditingLink] = useState(false)
-  const [urlInput, setUrlInput] = useState(
+
+  const initialUrl =
     mod.profileUrl ??
-      (mod.gbId ? `https://gamebanana.com/mods/${mod.gbId}` :
-       mod.id ? `https://gamebanana.com/mods/${mod.id}` : '')
-  )
+    (mod.gbId ? `https://gamebanana.com/mods/${mod.gbId}` :
+     mod.id ? `https://gamebanana.com/mods/${mod.id}` : '')
+
+  const [urlInput, setUrlInput] = useState(initialUrl)
 
   const displayName = stripIdSuffix(mod.name)
   const displayFileName = stripIdSuffix(mod.fileName)
+  const isEnabled = mod.enabled ?? true
+  const gbUrl = buildGbUrl(mod)
+  const currentGameId = mod.gameId ?? 0
 
   function handleOpenFolder() {
     if (mod.path) {
       window.modApi.openFolder(mod.path)
       return
     }
-    if (mod.gameId != null && mod.gameId !== 0) {
+    if (mod.gameId && mod.gameId !== 0) {
       window.modApi.openGamePath(mod.gameId)
     } else {
       window.modApi.openModsDir()
     }
   }
-
-  const gbUrl =
-    mod.profileUrl ??
-    (mod.gbId ? `https://gamebanana.com/mods/${mod.gbId}` :
-     mod.id ? `https://gamebanana.com/mods/${mod.id}` : null)
 
   async function handleSaveLink() {
     const normalized = normalizeGbUrl(urlInput)
@@ -112,8 +126,7 @@ function ModRow({
             gbId
           )
           if (newPath) {
-            mod.installPath = newPath
-            mod.path = newPath
+            onChangeMeta(mod.id, { installPath: newPath, path: newPath })
           }
         } catch (err) {
           console.error('Failed to rename folder with GB id', err)
@@ -121,21 +134,38 @@ function ModRow({
       }
     }
 
-    mod.profileUrl = normalized
-    mod.gbId = gbId
-
+    onChangeMeta(mod.id, { profileUrl: normalized, gbId: gbId ?? undefined })
     setEditingLink(false)
   }
 
-  const currentGameId = mod.gameId ?? 0
-  const currentGameName =
-    GAME_OPTIONS.find((g) => g.id === currentGameId)?.name ?? 'Unknown / Any'
+  async function handleToggleEnabled() {
+    const next = !isEnabled
+    if (next) {
+      await window.modApi.enableMod(mod.id)
+    } else {
+      await window.modApi.disableMod(mod.id)
+    }
+    onToggleEnabled(mod.id, next)
+  }
 
   return (
-    <div className="flex items-center gap-4 bg-gray-800 rounded-xl px-4 py-3 border border-gray-700 hover:border-gray-600 transition-colors">
+    <div
+      className={`flex items-center gap-4 rounded-xl px-4 py-3 border transition-colors ${
+        isEnabled
+          ? 'bg-gray-800 border-gray-700 hover:border-gray-600'
+          : 'bg-gray-900/60 border-gray-800 opacity-80'
+      }`}
+    >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <h3 className="font-medium text-white truncate">{displayName}</h3>
+          <h3 className="font-medium text-white truncate">
+            {displayName}
+          </h3>
+          {!isEnabled && (
+            <span className="shrink-0 text-[10px] uppercase tracking-wide bg-gray-700 text-gray-200 rounded px-1.5 py-0.5">
+              Disabled
+            </span>
+          )}
           {hasUpdate && (
             <span className="shrink-0 text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded px-1.5 py-0.5">
               Update available
@@ -170,6 +200,18 @@ function ModRow({
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
+        {/* Enable / Disable toggle */}
+        <button
+          onClick={handleToggleEnabled}
+          className={
+            isEnabled
+              ? 'px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-xs text-gray-200 transition-colors'
+              : 'px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-xs text-black font-semibold transition-colors'
+          }
+        >
+          {isEnabled ? 'Disable' : 'Enable'}
+        </button>
+
         {hasUpdate && (
           <button
             onClick={() => onUpdate(mod, hasUpdate)}
@@ -180,7 +222,7 @@ function ModRow({
           </button>
         )}
 
-        {/* Open folder icon */}
+        {/* Open folder */}
         <button
           onClick={handleOpenFolder}
           className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs transition-colors"
@@ -189,7 +231,7 @@ function ModRow({
           📁
         </button>
 
-        {/* GameBanana icon + link editor */}
+        {/* GameBanana link / editor */}
         <div className="relative">
           <button
             type="button"
@@ -245,6 +287,7 @@ function ModRow({
           )}
         </div>
 
+        {/* Remove */}
         {confirming ? (
           <>
             <span className="text-xs text-red-400">Remove?</span>
@@ -274,6 +317,8 @@ function ModRow({
   )
 }
 
+// ─── Main Library ─────────────────────────────────────────────────────────────
+
 export default function Library() {
   const [mods, setMods] = useState<LibraryMod[]>([])
   const [updates, setUpdates] = useState<UpdateAvailable[]>([])
@@ -284,19 +329,8 @@ export default function Library() {
   const [searchQuery, setSearchQuery] = useState('')
   const [gameFilter, setGameFilter] = useState<number>(0) // 0 = all
 
-  useEffect(() => {
-    loadMods()
-    const cleanup = window.modApi.onProgress(setProgress)
-
-    window.addEventListener('focus', loadMods)
-
-    return () => {
-      cleanup()
-      window.removeEventListener('focus', loadMods)
-    }
-  }, [])
-
-  async function loadMods() {
+  // Load + merge installed + scanned
+  const loadMods = useCallback(async () => {
     try {
       const [knownMap, scanned] = await Promise.all([
         window.modApi.getInstalledMods(),
@@ -304,17 +338,17 @@ export default function Library() {
       ])
 
       const knownMods = Object.values(knownMap) as InstalledMod[]
-
       const knownByPath = new Map<string, InstalledMod>()
+
       for (const km of knownMods) {
-        if (km.installPath) knownByPath.set(km.installPath, km)
+        const p = (km as any).installPath as string | undefined
+        if (p) knownByPath.set(p, km)
       }
 
-      const merged: LibraryMod[] = [...knownMods]
+      const merged: LibraryMod[] = [...(knownMods as LibraryMod[])]
 
       for (const sm of scanned as DetectedMod[]) {
-        const existing = knownByPath.get(sm.path)
-        if (existing) continue
+        if (knownByPath.has(sm.path)) continue
 
         merged.push({
           id: sm.id ?? 0,
@@ -327,8 +361,8 @@ export default function Library() {
           installPath: sm.path,
           path: sm.path,
           profileUrl:
-            sm.profileUrl ??
-            (sm.id ? `https://gamebanana.com/mods/${sm.id}` : null)
+            sm.profileUrl ?? (sm.id ? `https://gamebanana.com/mods/${sm.id}` : null),
+          enabled: true
         })
       }
 
@@ -336,21 +370,34 @@ export default function Library() {
     } catch (e) {
       console.error('Failed to load installed mods:', e)
     }
+  }, [])
+
+  useEffect(() => {
+    loadMods()
+    const cleanupProgress = window.modApi.onProgress(setProgress)
+    const handleFocus = () => loadMods()
+
+    window.addEventListener('focus', handleFocus)
+    return () => {
+      cleanupProgress()
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [loadMods])
+
+  function patchMod(id: number, patch: Partial<LibraryMod>) {
+    setMods((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+    )
   }
 
   function handleChangeGame(modId: number, gameId: number) {
-    setMods((prev) =>
-      prev.map((m) =>
-        m.id === modId
-          ? {
-              ...m,
-              gameId,
-              gameName:
-                GAME_OPTIONS.find((g) => g.id === gameId)?.name ?? m.gameName
-            }
-          : m
-      )
-    )
+    const gameName =
+      GAME_OPTIONS.find((g) => g.id === gameId)?.name ?? 'Unknown / Any'
+    patchMod(modId, { gameId, gameName })
+  }
+
+  function handleToggleEnabledState(modId: number, enabled: boolean) {
+    patchMod(modId, { enabled })
   }
 
   async function handleCheckUpdates() {
@@ -406,15 +453,21 @@ export default function Library() {
     }
   }
 
-  const filteredMods = mods
-    .filter((m) => filter === 'all' || updates.some((u) => u.modId === m.id))
-    .filter((m) => (gameFilter === 0 ? true : m.gameId === gameFilter))
-    .filter(
-      (m) =>
-        !searchQuery.trim() ||
-        m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        m.gameName.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+  const filteredMods = useMemo(
+    () =>
+      mods
+        .filter((m) => filter === 'all' || updates.some((u) => u.modId === m.id))
+        .filter((m) => (gameFilter === 0 ? true : m.gameId === gameFilter))
+        .filter((m) => {
+          const q = searchQuery.trim().toLowerCase()
+          if (!q) return true
+          return (
+            m.name.toLowerCase().includes(q) ||
+            m.gameName.toLowerCase().includes(q)
+          )
+        }),
+    [mods, filter, updates, gameFilter, searchQuery]
+  )
 
   return (
     <div className="space-y-5">
@@ -529,6 +582,8 @@ export default function Library() {
               onUpdate={handleUpdate}
               updating={updatingId === mod.id}
               onChangeGame={handleChangeGame}
+              onToggleEnabled={handleToggleEnabledState}
+              onChangeMeta={patchMod}
             />
           ))}
         </div>

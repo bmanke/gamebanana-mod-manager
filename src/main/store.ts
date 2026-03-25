@@ -14,6 +14,7 @@ export interface InstalledMod {
   installedTimestamp: number
   profileUrl?: string | null
   gbId?: number | null
+  enabled?: boolean
 }
 
 interface GamePathMap {
@@ -46,9 +47,18 @@ function loadData(): StoreData {
   }
   try {
     const raw = fs.readFileSync(STORE_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(raw) as StoreData
+
+    const mods: StoreData['mods'] = {}
+    for (const [id, mod] of Object.entries(parsed.mods ?? {})) {
+      mods[Number(id)] = {
+        ...mod,
+        enabled: typeof mod.enabled === 'boolean' ? mod.enabled : true
+      }
+    }
+
     return {
-      mods: parsed.mods ?? {},
+      mods,
       gamePaths: parsed.gamePaths ?? {},
       gameExePaths: parsed.gameExePaths ?? {}
     }
@@ -69,7 +79,7 @@ class Store {
     this.data = loadData()
   }
 
-  // ─── Mods ───────────────────────────────────────────────────────────────────
+  // Mods
   get(id: number): InstalledMod | undefined {
     return this.data.mods[id]
   }
@@ -102,7 +112,14 @@ class Store {
     this.set(modId, mod)
   }
 
-  // ─── Game paths ─────────────────────────────────────────────────────────────
+  setEnabled(modId: number, enabled: boolean) {
+    const mod = this.data.mods[modId]
+    if (!mod) return
+    mod.enabled = enabled
+    this.set(modId, mod)
+  }
+
+  // Game paths (mod install folders)
   getGamePath(gameId: number): string | undefined {
     return this.data.gamePaths[gameId]
   }
@@ -121,7 +138,7 @@ class Store {
     return { ...this.data.gamePaths }
   }
 
-  // ─── Game exe paths (ReShade) ───────────────────────────────────────────────
+  // Game exe paths (ReShade)
   getGameExePath(gameId: number): string | undefined {
     return this.data.gameExePaths[gameId]
   }
