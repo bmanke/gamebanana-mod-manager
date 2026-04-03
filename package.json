@@ -1,7 +1,7 @@
 {
   "name": "gamebanana-mod-manager",
   "productName": "GB Mod Manager",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "A mod manager to manage mods from GameBanana with some other QOL features.",
   "main": "./out/main/index.js",
   "author": "Aeonian Rose (BManke)",
