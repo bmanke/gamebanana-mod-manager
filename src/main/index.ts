@@ -84,6 +84,10 @@ function ensureDir(dir: string) {
   }
 }
 
+// Legacy helpers – no longer used for new installs, but left here if you
+// still keep migration logic. You can delete migrateModsToGlobalStore entirely
+// once you no longer care about old layouts.
+
 function linkNameForMod(mod: InstalledMod): string {
   return `${mod.name}_${mod.id}`
 }
@@ -93,8 +97,6 @@ function makeDirLink(target: string, linkPath: string) {
   const type: fs.symlink.Type = process.platform === 'win32' ? 'junction' : 'dir'
   fs.symlinkSync(target, linkPath, type)
 }
-
-// Migration: move old installs into global MODS_DIR and create links per game
 
 function migrateModsToGlobalStore() {
   const modsRoot = getModsDir()
@@ -165,6 +167,13 @@ ipcMain.handle(
     gameId: number
   ) => {
     const modsRoot = getModsDir()
+    ensureDir(modsRoot)
+
+    const gamePath = store.getGamePath(gameId)
+    if (!gamePath) {
+      throw new Error('No mod install folder set for this game. Set it in Settings first.')
+    }
+    ensureDir(gamePath)
 
     const installPath = await installMod(
       modId,
@@ -172,6 +181,7 @@ ipcMain.handle(
       downloadUrl,
       name,
       modsRoot,
+      gamePath,
       (pct) => event.sender.send('mod:progress', pct)
     )
 
@@ -183,19 +193,11 @@ ipcMain.handle(
       fileId,
       fileName,
       downloadUrl,
-      installPath,
+      installPath, // final folder in game path
       installedTimestamp: Date.now(),
       enabled: true
     }
     store.set(modId, mod)
-
-    const gamePath = store.getGamePath(gameId)
-    if (gamePath) {
-      ensureDir(gamePath)
-      const linkName = linkNameForMod(mod)
-      const linkPath = path.join(gamePath, linkName)
-      makeDirLink(installPath, linkPath)
-    }
 
     return installPath
   }
@@ -204,16 +206,11 @@ ipcMain.handle(
 ipcMain.handle('mod:uninstall', async (_, modId: number) => {
   const mod = store.get(modId)
   if (mod?.installPath) {
-    const gamePath = store.getGamePath(mod.gameId)
-    if (gamePath) {
-      const linkName = linkNameForMod(mod)
-      const linkPath = path.join(gamePath, linkName)
-      if (fs.existsSync(linkPath)) {
-        await fs.promises.rm(linkPath, { recursive: false, force: true })
-      }
+    try {
+      await uninstallMod(mod.installPath)
+    } catch {
+      // ignore; maybe already removed manually
     }
-
-    await uninstallMod(mod.installPath)
   }
   store.remove(modId)
 })
@@ -228,22 +225,10 @@ ipcMain.handle('mod:setGbId', (_, modId: number, gbId: number | null) => {
   store.setGbId(modId, gbId)
 })
 
-// Enable / disable: add/remove symlink in per‑game path
-
 ipcMain.handle('mod:disable', async (_, modId: number) => {
   const mod = store.get(modId)
   if (!mod) return
   if (mod.enabled === false) return
-
-  const gamePath = store.getGamePath(mod.gameId)
-  if (gamePath) {
-    const linkName = linkNameForMod(mod)
-    const linkPath = path.join(gamePath, linkName)
-    if (fs.existsSync(linkPath)) {
-      await fs.promises.rm(linkPath, { recursive: false, force: true })
-    }
-  }
-
   store.setEnabled(modId, false)
 })
 
@@ -251,21 +236,9 @@ ipcMain.handle('mod:enable', async (_, modId: number) => {
   const mod = store.get(modId)
   if (!mod) return
   if (mod.enabled === true) return
-
-  const gamePath = store.getGamePath(mod.gameId)
-  if (gamePath) {
-    ensureDir(gamePath)
-    const linkName = linkNameForMod(mod)
-    const linkPath = path.join(gamePath, linkName)
-    if (!fs.existsSync(linkPath)) {
-      makeDirLink(mod.installPath, linkPath)
-    }
-  }
-
   store.setEnabled(modId, true)
 })
 
-// rename by mod id (for manager-installed mods)
 ipcMain.handle('mod:renameWithGbId', async (_event, modId: number, gbId: number) => {
   const mod = store.get(modId)
   if (!mod) throw new Error(`Mod ${modId} not found`)
@@ -288,7 +261,6 @@ ipcMain.handle('mod:renameWithGbId', async (_event, modId: number, gbId: number)
   return newPath
 })
 
-// rename by path (works for scanned-only mods too)
 ipcMain.handle(
   'mod:renamePathWithGbId',
   async (_event, folderPath: string, displayName: string, gbId: number) => {
@@ -445,7 +417,7 @@ ipcMain.handle('gameExePath:open', (_, gameId: number) => {
   if (p) shell.openPath(p)
 })
 
-// ReShade Handlers (unchanged except your Arknights block if you add it)
+// ReShade Handlers
 
 ipcMain.handle('reshade:getLatest', () => {
   return getBundledRelease()
@@ -485,8 +457,7 @@ ipcMain.handle('reshade:uninstall', (_, gameId: number) => {
   return { installed: false }
 })
 
-// ReShade preset handlers (unchanged)
-// ... keep your existing reshade:listPresets, setActivePreset, etc. ...
+// ReShade preset handlers
 
 ipcMain.handle('reshade:listPresets', (_, gameId: number) => {
   const gameDir = store.getGameExePath(gameId)
@@ -557,7 +528,7 @@ ipcMain.handle('gb:getGameCategories', async (_, gameId: number) => {
   }))
 })
 
-ipcMain.handle('gb:getGameMods', async (_ , gameId: number, categoryId?: number) => {
+ipcMain.handle('gb:getGameMods', async (_, gameId: number, categoryId?: number) => {
   const base = 'https://gamebanana.com/apiv11/Mod'
   const params = new URLSearchParams({
     _nPerpage: '50',
@@ -593,7 +564,8 @@ ipcMain.handle('gb:fetch', async (_, url: string) => {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.modmanager')
 
-  migrateModsToGlobalStore()
+  // If you no longer want migration, comment this out:
+  // migrateModsToGlobalStore()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

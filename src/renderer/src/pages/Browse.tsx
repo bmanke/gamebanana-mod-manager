@@ -2,18 +2,20 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   searchMods,
   getModDetails,
+  getModFiles,
   getModThumbnail,
   formatDate,
   formatFileSize,
   GBModSummary,
   GBMod,
-  GBGame
+  GBGame,
+  GBFile
 } from '../api/gamebanana'
 
 // ─── Hard‑coded games we care about ───────────────────────────────────────────
 
 const SUPPORTED_GAMES: GBGame[] = [
-  { _idRow: 8552,  _sName: 'Genshin Impact' },
+  { _idRow: 8552, _sName: 'Genshin Impact' },
   { _idRow: 18366, _sName: 'Honkai: Star Rail' },
   { _idRow: 19567, _sName: 'Zenless Zone Zero' },
   { _idRow: 20357, _sName: 'Wuthering Waves' },
@@ -60,6 +62,7 @@ function ModCard({
           </div>
         )}
       </div>
+
       <div className="p-3 space-y-1">
         <div className="flex items-start justify-between gap-1">
           <h3 className="font-semibold text-sm text-white leading-tight line-clamp-2">
@@ -71,9 +74,11 @@ function ModCard({
             </span>
           )}
         </div>
+
         <p className="text-xs text-gray-400 truncate">
           by {mod._aSubmitter?._sName ?? 'Unknown'}
         </p>
+
         <div className="flex items-center gap-3 text-xs text-gray-500 pt-1">
           <span>⬇ {(mod._nDownloadCount ?? 0).toLocaleString()}</span>
           <span>♥ {(mod._nLikeCount ?? 0).toLocaleString()}</span>
@@ -102,24 +107,56 @@ function ModDetailModal({
   onInstalled: (modId: number) => void
 }) {
   const [mod, setMod] = useState<GBMod | null>(null)
+  const [files, setFiles] = useState<GBFile[]>([])
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [installing, setInstalling] = useState(false)
 
   const isInstalled = installedMods.has(modId)
-  const file = mod?._aFiles?.at(-1)
+  const file = files.at(-1) ?? mod?._aFiles?.at(-1) ?? null
 
   useEffect(() => {
-    setLoading(true)
-    setError(null)
+    let cancelled = false
 
-    getModDetails(modId, summary)
-      .then(setMod)
-      .catch(() => {
-        setError('Failed to load full mod details, showing basic info.')
-      })
-      .finally(() => setLoading(false))
+    async function load() {
+      setLoading(true)
+      setError(null)
+      setMod(null)
+      setFiles([])
+
+      try {
+        const fullMod = await getModDetails(modId, summary)
+        if (cancelled) return
+        setMod(fullMod)
+
+        if (fullMod._aFiles?.length) {
+          setFiles(fullMod._aFiles)
+        } else {
+          const modFiles = await getModFiles(modId)
+          if (cancelled) return
+          setFiles(modFiles)
+        }
+      } catch {
+        try {
+          const modFiles = await getModFiles(modId)
+          if (cancelled) return
+          setFiles(modFiles)
+          setError('Failed to load full mod details, but download files were found.')
+        } catch {
+          if (cancelled) return
+          setError('Failed to load mod details and files.')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    load()
+
+    return () => {
+      cancelled = true
+    }
   }, [modId, summary])
 
   useEffect(() => {
@@ -128,20 +165,31 @@ function ModDetailModal({
   }, [])
 
   async function handleInstall() {
-    if (!mod || !file) return
+    if (!file) return
+
+    const modName = mod?._sName ?? summary._sName
+    const gameName = mod?._aGame?._sName ?? summary._aGame?._sName ?? 'Unknown game'
+    const gameId = mod?._aGame?._idRow ?? summary._aGame?._idRow
+
+    if (!gameId) {
+      setError('Missing game information for installation.')
+      return
+    }
+
     setInstalling(true)
     setError(null)
+
     try {
       await window.modApi.installMod(
-        mod._idRow,
+        modId,
         file._idRow,
         file._sFile,
         file._sDownloadUrl,
-        mod._sName,
-        mod._aGame._sName,
-        mod._aGame._idRow
+        modName,
+        gameName,
+        gameId
       )
-      onInstalled(mod._idRow)
+      onInstalled(modId)
     } catch {
       setError('Installation failed. Please try again.')
     } finally {
@@ -161,10 +209,9 @@ function ModDetailModal({
     (mod ?? summary)._sProfileUrl
 
   const downloads = (mod?._nDownloadCount ?? summary._nDownloadCount ?? 0).toLocaleString()
-  const likes     = (mod?._nLikeCount     ?? summary._nLikeCount     ?? 0).toLocaleString()
-  const views     = (mod?._nViewCount     ?? 0).toLocaleString()
+  const likes = (mod?._nLikeCount ?? summary._nLikeCount ?? 0).toLocaleString()
+  const views = (mod?._nViewCount ?? 0).toLocaleString()
 
-  // Always use summary preview so the image never disappears on re‑render
   const thumb = getModThumbnail(summary)
 
   return (
@@ -183,6 +230,7 @@ function ModDetailModal({
             alt={displayName}
           />
         )}
+
         <div className="p-6 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -193,6 +241,7 @@ function ModDetailModal({
                   <a
                     href={displayAuthorUrl}
                     target="_blank"
+                    rel="noreferrer"
                     className="text-yellow-400 hover:underline"
                   >
                     {displayAuthorName}
@@ -205,6 +254,7 @@ function ModDetailModal({
                 {mod?._aCategory && ` · ${mod._aCategory._sName}`}
               </p>
             </div>
+
             <button
               onClick={onClose}
               className="text-gray-500 hover:text-white text-xl shrink-0"
@@ -239,6 +289,12 @@ function ModDetailModal({
             </div>
           )}
 
+          {!loading && !file && (
+            <div className="bg-gray-800 rounded-lg p-3 text-sm text-gray-400">
+              No downloadable file was found for this mod.
+            </div>
+          )}
+
           {progress !== null && (
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-gray-400">
@@ -264,21 +320,28 @@ function ModDetailModal({
               >
                 ✓ Installed
               </button>
+            ) : file ? (
+              <button
+                onClick={handleInstall}
+                disabled={installing}
+                className="px-5 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {installing ? 'Downloading...' : 'Download / Install'}
+              </button>
             ) : (
-              mod && file && (
-                <button
-                  onClick={handleInstall}
-                  disabled={installing}
-                  className="px-5 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {installing ? 'Installing...' : 'Install'}
-                </button>
-              )
+              <button
+                disabled
+                className="px-5 py-2 rounded-lg bg-gray-800 text-gray-400 border border-gray-700 text-sm cursor-not-allowed"
+              >
+                No Download Available
+              </button>
             )}
+
             {summary._sProfileUrl && (
               <a
                 href={summary._sProfileUrl}
                 target="_blank"
+                rel="noreferrer"
                 className="px-4 py-2 rounded-lg border border-gray-600 hover:border-gray-400 text-sm text-gray-300 hover:text-white transition-colors"
               >
                 View on GameBanana ↗
@@ -323,9 +386,11 @@ export default function Browse() {
           perPage: 24,
           query: searchText?.trim() || undefined
         })
+
         const records = includeMature
           ? result.records
           : result.records.filter((m) => !isMatureMod(m))
+
         setMods(records)
         setPage(targetPage)
         setTotalPages(result.totalPages)
@@ -348,17 +413,16 @@ export default function Browse() {
     window.localStorage.setItem('includeMature', String(includeMature))
   }, [includeMature])
 
-  // Initial + when game changes
   useEffect(() => {
     fetchMods(1, currentGame, query)
   }, [currentGame, fetchMods])
 
-  // Debounced search when query changes
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current)
     searchDebounce.current = setTimeout(() => {
       fetchMods(1, currentGame, query)
     }, 400)
+
     return () => {
       if (searchDebounce.current) clearTimeout(searchDebounce.current)
     }
@@ -371,7 +435,6 @@ export default function Browse() {
 
   return (
     <div className="space-y-5">
-      {/* Top row: game tabs + search + mature toggle */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex flex-wrap gap-2">
           {SUPPORTED_GAMES.map((game) => {
@@ -412,7 +475,6 @@ export default function Browse() {
         </label>
       </div>
 
-      {/* Content */}
       <>
         {error && (
           <div className="bg-red-900/30 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
