@@ -235,4 +235,4 @@ For games where you enable ReShade in the manager:
 
 ## License
 
-This work is licensed under a [Creative Commons Attribution-NonCommercial-NoDerivs 4.0 Unported License](https://gamebanana.com/linkfilter?url=http%3A%2F%2Fcreativecommons.org%2Flicenses%2Fby-nc-nd%2F4.0%2F&follow=undefined).
+This work is licensed under a [Creative Commons Attribution-NonCommercial-NoDerivs 4.0 Unported License](https://creativecommons.org/licenses/by-nc-nd/4.0/).
