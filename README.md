@@ -227,11 +227,9 @@ For games where you enable ReShade in the manager:
 
 ## Roadmap / Ideas
 
-- Per‑mod enable/disable without uninstall (e.g., renaming or moving out of the Mods folder).
 - More robust update flow (in‑place update with backup/rollback).
 - Custom tags / notes for installed mods.
 - Export/import of your mod library configuration.
-- Linux and macOS builds (depending on game/launcher support).
 
 ---
 
